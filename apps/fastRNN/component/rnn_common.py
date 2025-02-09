@@ -52,9 +52,7 @@ def conv1d(
         )
 
     else:
-        raise NotImplementedError(
-                f"causal_conv1d implementation {impl} not supported"
-            )
+        raise NotImplementedError(f"causal_conv1d implementation {impl} not supported")
 
     return x
 

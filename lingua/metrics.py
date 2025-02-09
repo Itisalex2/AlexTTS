@@ -3,7 +3,7 @@
 
 import logging
 from collections import namedtuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 import json
@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import torch
 import torch.nn as nn
 
-from lingua.distributed import get_is_master
 import wandb
 
 logger = logging.getLogger()
@@ -61,15 +60,15 @@ class MetricLogger:
     def open(self):
         if self.jsonl_writer is None:
             self.jsonl_writer = open(self.outdir, "a")
-        if (
-            self.args is not None
-            and self.args.logging.wandb is not None
-            and get_is_master()
-        ):
-            run = wandb.init(
-                config=asdict(self.args),
-                **asdict(self.args.logging.wandb),
-            )
+        # if (
+        #     self.args is not None
+        #     and self.args.logging.wandb is not None
+        #     and get_is_master()
+        # ):
+        #     run = wandb.init(
+        #         config=asdict(self.args),
+        #         **asdict(self.args.logging.wandb),
+        #     )
 
     def log(self, metrics: Dict[str, Any]):
         if (
@@ -197,8 +196,8 @@ def upload_train_to_wandb(
         wandb.init(config=cfg, name=cfg["name"], project=project, entity=entity)
 
         with open(Path(ckpt_dir) / "metrics.jsonl") as f:
-            for l in f:
-                m = json.loads(l)
+            for line in f:
+                m = json.loads(line)
                 wandb.log(m, step=m["global_step"])
 
         wandb.finish()
@@ -207,11 +206,11 @@ def upload_train_to_wandb(
         wandb.init(config=cfg, name=cfg["name"], project=project, entity=entity)
 
         with open(Path(ckpt_dir) / "metrics.eval.jsonl") as f:
-            for l in f:
-                m = json.loads(l)
+            for line in f:
+                m = json.loads(line)
                 wandb.log(
                     {
-                        f"evals/{name.replace('/','.')}": value
+                        f"evals/{name.replace('/', '.')}": value
                         for name, value in m.items()
                         if "/" in name
                     },

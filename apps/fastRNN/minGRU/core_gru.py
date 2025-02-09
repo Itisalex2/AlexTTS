@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional
 
 import torch
 from torch import nn
@@ -53,9 +52,9 @@ class GRU(nn.Module):
         if ffn_dim_multiplier is not None:
             hidden_dim = int(ffn_dim_multiplier * hidden_dim)
         hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-        assert (
-            hidden_dim % n_heads == 0
-        ), f"Hidden dim must be divisible by n_heads: {hidden_dim} % {n_heads} != 0"
+        assert hidden_dim % n_heads == 0, (
+            f"Hidden dim must be divisible by n_heads: {hidden_dim} % {n_heads} != 0"
+        )
 
         self.dim = dim
         self.hidden_dim = hidden_dim
@@ -65,9 +64,9 @@ class GRU(nn.Module):
 
         self.conv_size = conv_size
         if conv_size is not None:
-            assert ((self.hidden_dim) % 8 == 0) and (
-                conv_size in [2, 3, 4]
-            ), f"Causal conv1d only supports conv_size in [2, 3, 4] and hidden_dim/head_dim % 8 == 0, got {self.hidden_dim} and {conv_size}"
+            assert ((self.hidden_dim) % 8 == 0) and (conv_size in [2, 3, 4]), (
+                f"Causal conv1d only supports conv_size in [2, 3, 4] and hidden_dim/head_dim % 8 == 0, got {self.hidden_dim} and {conv_size}"
+            )
             self.conv_dim = self.hidden_dim
             self.conv_weight = nn.Parameter(torch.empty((self.conv_dim, conv_size)))
 
@@ -96,7 +95,11 @@ class GRU(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        x: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
         bsz, seq_len, _ = x.shape
 
@@ -177,9 +180,15 @@ class GRUBlock(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        x: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
-        x = x + self.gru(self.gru_norm(x), tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)
+        x = x + self.gru(
+            self.gru_norm(x), tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl
+        )
         return x
 
     def init_weights(self, init_std: Optional[float], factor: InitStdFactor):
@@ -200,7 +209,11 @@ class BaseMinGRU(nn.Module):
             self.layers.append(GRUBlock(args))
 
     def forward(
-        self, h: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        h: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
         for i, layer in enumerate(self.layers):
             h = layer(h, tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)

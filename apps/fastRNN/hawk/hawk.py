@@ -12,7 +12,6 @@ from apps.fastRNN.hawk.core_hawk import BaseHawkArgs, BaseHawk
 
 @dataclass
 class LMHawkArgs(BaseHawkArgs):
-
     seed: int = 42
 
     vocab_size: int = -1
@@ -51,7 +50,6 @@ class LMHawk(BaseHawk):
         cu_seqlens: Optional[int] = None,
         impl: str = "parallel",
     ) -> torch.Tensor:
-
         h = self.tok_embeddings(token_values)
 
         h = super().forward(h, tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)

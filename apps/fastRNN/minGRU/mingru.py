@@ -12,7 +12,6 @@ from apps.fastRNN.minGRU.core_gru import BaseMinGRUArgs, BaseMinGRU
 
 @dataclass
 class LMMinGRUArgs(BaseMinGRUArgs):
-
     seed: int = 42
 
     vocab_size: int = -1
@@ -58,7 +57,7 @@ class LMMinGRU(BaseMinGRU):
         self.tok_embeddings = torch.nn.Embedding(args.vocab_size, args.dim)
 
         self.norm = RMSNorm(args.dim, eps=args.norm_eps)
-        
+
         if args.weight_tying:
             self.output = TiedLinear(self.tok_embeddings)
         else:
@@ -76,7 +75,6 @@ class LMMinGRU(BaseMinGRU):
         cu_seqlens: Optional[torch.Tensor] = None,
         impl: str = "parallel",
     ) -> torch.Tensor:
-
         h = self.tok_embeddings(token_values)
 
         h = super().forward(h, tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)

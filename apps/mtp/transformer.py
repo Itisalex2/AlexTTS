@@ -53,7 +53,6 @@ def causal_mask(b, h, q_idx, kv_idx):
 
 @dataclass
 class LMMTPArgs(BaseTransformerArgs):
-
     seed: int = 42
     n_future_head: int = 1
 

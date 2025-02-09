@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 import torch
 import causal_conv1d_cuda
 
+
 # Causal Conv1D Forward Function
 @torch.library.custom_op(
     "mamba_causal_conv1d::causal_conv1d_fwd",
@@ -38,6 +39,7 @@ def causal_conv1d_fwd(
     )
     return out
 
+
 # Register a fake forward pass for tracing
 @causal_conv1d_fwd.register_fake
 def _causal_conv1d_fwd_fake(
@@ -50,9 +52,10 @@ def _causal_conv1d_fwd_fake(
     torch._check(x.shape[-2] == weight.shape[0])
     return torch.empty_like(x)
 
+
 # Causal Conv1D Backward Function
 @torch.library.custom_op(
-    "mamba_causal_conv1d::causal_conv1d_bwd", 
+    "mamba_causal_conv1d::causal_conv1d_bwd",
     mutates_args=(),
     device_types="cuda",
 )
@@ -75,8 +78,9 @@ def causal_conv1d_bwd(
 
     # Handle optional bias gradient
     dbias = dbias if bias is not None else torch.empty((0,), device=dout.device)
-    
+
     return dx, dweight, dbias
+
 
 # Register a fake backward pass for tracing
 @causal_conv1d_bwd.register_fake
@@ -94,20 +98,25 @@ def _causal_conv1d_bwd_fake(
         torch.empty_like(bias) if bias is not None else None,
     )
 
+
 # Setup context for autograd
 def causal_conv1d_setup_context(ctx, inputs, output):
     x, weight, bias, seq_idx, activation = inputs
     ctx.activation = activation in ["silu", "swish"]
     ctx.save_for_backward(x, weight, bias, seq_idx)
 
+
 # Bridge for backward pass in autograd
 def causal_conv1d_bwd_bridge(ctx, dout):
     x, weight, bias, seq_idx = ctx.saved_tensors
-    dx, dweight, dbias = causal_conv1d_bwd(x, weight, bias, dout, seq_idx, ctx.activation)
-    
+    dx, dweight, dbias = causal_conv1d_bwd(
+        x, weight, bias, dout, seq_idx, ctx.activation
+    )
+
     # Handle None return values
     dbias = dbias if bias is not None else None
     return dx, dweight, dbias, None, None
+
 
 # Register custom autograd function
 torch.library.register_autograd(
@@ -115,6 +124,7 @@ torch.library.register_autograd(
     causal_conv1d_bwd_bridge,
     setup_context=causal_conv1d_setup_context,
 )
+
 
 # Define a higher-level function to invoke the custom op
 def causal_conv1d_fn(x, weight, bias=None, seq_idx=None, activation=None):
@@ -127,7 +137,7 @@ def causal_conv1d_fn(x, weight, bias=None, seq_idx=None, activation=None):
     device_types="cuda",
 )
 def causal_conv1d_update_fwd(
-    x: torch.Tensor, 
+    x: torch.Tensor,
     conv_state: torch.Tensor,
     weight: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
@@ -159,9 +169,10 @@ def causal_conv1d_update_fwd(
         out = out.squeeze(-1)
     return out
 
+
 @causal_conv1d_update_fwd.register_fake
 def _causal_conv1d_update_fwd(
-    x: torch.Tensor, 
+    x: torch.Tensor,
     conv_state: torch.Tensor,
     weight: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
@@ -170,8 +181,14 @@ def _causal_conv1d_update_fwd(
 ) -> torch.Tensor:
     return torch.empty_like(x)
 
-def causal_conv1d_update(x, conv_state, weight, bias=None, activation=None, cache_seqlens=None):
-    return causal_conv1d_update_fwd(x, conv_state, weight, bias, activation, cache_seqlens)
+
+def causal_conv1d_update(
+    x, conv_state, weight, bias=None, activation=None, cache_seqlens=None
+):
+    return causal_conv1d_update_fwd(
+        x, conv_state, weight, bias, activation, cache_seqlens
+    )
+
 
 # Test the implementation
 if __name__ == "__main__":
@@ -181,7 +198,7 @@ if __name__ == "__main__":
 
     x = torch.randn(8, 32, 16, device="cuda", requires_grad=True)
     weight = torch.randn(32, 3, device="cuda", requires_grad=True)
-    bias = None#torch.randn(32, device="cuda", requires_grad=True)
+    bias = None  # torch.randn(32, device="cuda", requires_grad=True)
 
     # Test the forward and backward pass
     print("Custom Implementation")

@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -81,7 +80,7 @@ def launch_eval(cfg: EvalArgs):
 
     wrap = EvalHarnessLM(generator)
     results = simple_evaluate(wrap, **asdict(cfg.harness))
-    val_results =  None
+    val_results = None
     if cfg.validation:
         val_results = eval_on_val(generator, cfg.validation, train_cfg)
     if get_global_rank() == 0:
@@ -114,7 +113,7 @@ def launch_eval(cfg: EvalArgs):
                 file=open(val_log_path, mode="a"),
                 flush=True,
             )
-    
+
     del generator
 
 

@@ -144,8 +144,9 @@ class PackedRNNGenerator(PackedCausalTransformerGenerator):
             [torch.tensor([0], device=self.device), self.cu_seqlens]
         ).int()
 
-        self.tok_idx = torch.repeat_interleave(lengths).int().unsqueeze(0).to(self.device)
-
+        self.tok_idx = (
+            torch.repeat_interleave(lengths).int().unsqueeze(0).to(self.device)
+        )
 
     @torch.compiler.disable
     def setup_generation(self, lengths):
@@ -203,7 +204,7 @@ def main():
 
     # Display the results
     for i, gen in enumerate(generation):
-        print(f"\nPrompt {i+1}: {prompts[i]}")
+        print(f"\nPrompt {i + 1}: {prompts[i]}")
         print(f"Generated Text: {gen}")
 
     print(f"\nTokens per second: {tokens_per_second:.2f}")

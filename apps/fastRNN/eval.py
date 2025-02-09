@@ -68,14 +68,16 @@ def launch_eval(cfg: EvalArgs):
     consolidate_path = str(consolidate_path)
     torch.distributed.barrier()
     logger.info("Loading model")
-    model, tokenizer, train_cfg = load_consolidated_model_and_tokenizer(consolidate_path)
+    model, tokenizer, train_cfg = load_consolidated_model_and_tokenizer(
+        consolidate_path
+    )
     logger.info("Model loaded")
     model.eval()
     generator = PackedRNNGenerator(cfg.generator, model, tokenizer)
 
     wrap = EvalHarnessLM(generator)
     results = simple_evaluate(wrap, **asdict(cfg.harness))
-    val_results =  None
+    val_results = None
     if cfg.validation:
         val_results = eval_on_val(generator, cfg.validation, train_cfg)
     if get_global_rank() == 0:
@@ -108,7 +110,7 @@ def launch_eval(cfg: EvalArgs):
                 file=open(val_log_path, mode="a"),
                 flush=True,
             )
-    
+
     del generator
 
 

@@ -12,7 +12,6 @@ from apps.mamba.core_mamba import BaseMambaArgs, BaseMamba
 
 @dataclass
 class LMMambaArgs(BaseMambaArgs):
-
     seed: int = 42
 
     vocab_size: int = -1
@@ -90,7 +89,6 @@ class LMMamba(BaseMamba):
         cu_seqlens: Optional[torch.Tensor] = None,
         ssm_impl: str = "ssm",
     ) -> torch.Tensor:
-
         h = self.tok_embeddings(token_values)
 
         h = super().forward(

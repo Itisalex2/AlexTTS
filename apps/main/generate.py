@@ -11,7 +11,6 @@ from tqdm import tqdm
 
 from omegaconf import OmegaConf
 from torch.nn import functional as F
-import xformers
 
 from apps.main.transformer import LMTransformer, LMTransformerArgs
 from lingua.args import dataclass_from_dict
@@ -68,9 +67,9 @@ def pack_prompts(prompts: List[int]):
     lengths = []
     for i, p in enumerate(prompts):
         p = torch.tensor(p, dtype=torch.long)
-        l = p.size(0)
+        length = p.size(0)
         res.append(p)
-        lengths.append(l)
+        lengths.append(length)
     lengths = torch.tensor(lengths, dtype=torch.long)
     res = torch.cat(res)
     return res, lengths
@@ -364,7 +363,6 @@ class PackedCausalTransformerGenerator:
 
             current_token = start_token
             for i in range(1, self.max_gen_len):
-
                 next_logits = self.generate_next_token(current_token)
                 next_token = sample_tokens(
                     next_logits.clone(), self.temperature, self.top_p, self.top_k
@@ -454,7 +452,7 @@ def main():
 
     # Display the results
     for i, gen in enumerate(generation):
-        print(f"\nPrompt {i+1}: {prompts[i]}")
+        print(f"\nPrompt {i + 1}: {prompts[i]}")
         print(f"Generated Text: {gen}")
 
     print(f"\nTokens per second: {tokens_per_second:.2f}")

@@ -58,7 +58,7 @@ def lr_cosine(
     theta: float,
     min_ratio: float,
 ) -> float:
-    sign = ((step // (n_steps*cycle_length)) % 2) * -2 + 1
+    sign = ((step // (n_steps * cycle_length)) % 2) * -2 + 1
     if step < warmup:
         lr = float(step) / warmup
     elif step <= n_steps:
@@ -69,6 +69,7 @@ def lr_cosine(
     else:
         lr = min_ratio
     return lr
+
 
 def lr_wsd(
     step: int,
@@ -88,7 +89,7 @@ def lr_wsd(
     if step == n_steps:
         cycle_num -= 1
         curr_n_steps = n_steps
-    
+
     if step < warmup:
         lr = float(step) / warmup
     elif step <= curr_n_steps - decay_length:
@@ -100,8 +101,8 @@ def lr_wsd(
         # lr = slope * step + intercept
 
         step_in_decay = step - (curr_n_steps - decay_length)
-        progress = step_in_decay / decay_length  
-        lr = 1 / (progress * (1/min_ratio) + (1 - progress))
+        progress = step_in_decay / decay_length
+        lr = 1 / (progress * (1 / min_ratio) + (1 - progress))
     else:
         lr = min_ratio
 
@@ -110,7 +111,9 @@ def lr_wsd(
 
 def build_lr_fn(args: OptimArgs, n_steps: int):
     if args.scheduler == "constant":
-        lr_fn = lambda x: 1.0
+
+        def lr_fn(x):
+            return 1.0
     elif args.scheduler == "linear":
         lr_fn = partial(
             lr_linear, warmup=args.warmup, n_steps=n_steps, min_ratio=args.lr_min_ratio

@@ -142,7 +142,7 @@ def main():
 
     # Display the results
     for i, gen in enumerate(generation):
-        print(f"\nPrompt {i+1}: {prompts[i]}")
+        print(f"\nPrompt {i + 1}: {prompts[i]}")
         print(f"Generated Text: {gen}")
 
     print(f"\nTokens per second: {tokens_per_second:.2f}")

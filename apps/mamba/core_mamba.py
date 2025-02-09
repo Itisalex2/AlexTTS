@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Optional, Tuple
 
 import torch
@@ -34,7 +33,6 @@ class InitArgs:
 
 @dataclass
 class BaseMambaArgs:
-
     dim: int = 512
     n_layers: int = 8
     n_heads: int = 8
@@ -95,9 +93,9 @@ class SSM(nn.Module):
         if ffn_dim_multiplier is not None:
             hidden_dim = int(ffn_dim_multiplier * hidden_dim)
         self.hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-        assert (
-            self.hidden_dim % n_heads == 0
-        ), f"Hidden dim must be divisible by n_heads: {self.hidden_dim} % {n_heads} != 0"
+        assert self.hidden_dim % n_heads == 0, (
+            f"Hidden dim must be divisible by n_heads: {self.hidden_dim} % {n_heads} != 0"
+        )
 
         self.state_dim = state_dim
         self.head_dim = self.hidden_dim // n_heads
@@ -118,9 +116,9 @@ class SSM(nn.Module):
         self.conv_dim = None
         if conv_size is not None:
             self.conv_dim = self.hidden_dim + 2 * self.n_groups * self.state_dim
-            assert (self.conv_dim % 8 == 0) and (
-                conv_size in [2, 3, 4]
-            ), f"Causal conv1d only supports conv_size in [2, 3, 4] and hidden_dim/head_dim % 8 == 0, got {self.conv_dim} and {conv_size}"
+            assert (self.conv_dim % 8 == 0) and (conv_size in [2, 3, 4]), (
+                f"Causal conv1d only supports conv_size in [2, 3, 4] and hidden_dim/head_dim % 8 == 0, got {self.conv_dim} and {conv_size}"
+            )
             self.conv_dim = self.hidden_dim + 2 * self.n_groups * self.state_dim
             self.conv_weight = nn.Parameter(torch.empty((self.conv_dim, conv_size)))
 

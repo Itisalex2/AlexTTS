@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional
 
 import torch
 from torch import nn
@@ -71,17 +70,17 @@ class RGLRU(nn.Module):
         self.dim = dim
         self.head_dim = head_dim
         self.n_heads = n_heads
-        assert (
-            head_dim * n_heads == dim
-        ), f"dim {dim} must be equal to n_heads {n_heads} * head_dim {head_dim}"
+        assert head_dim * n_heads == dim, (
+            f"dim {dim} must be equal to n_heads {n_heads} * head_dim {head_dim}"
+        )
 
         self.c = 8.0
 
         self.conv_size = conv_size
         if conv_size is not None:
-            assert (dim % 8 == 0) and (
-                conv_size in [2, 3, 4]
-            ), f"Causal conv1d only supports conv_size in [2, 3, 4] and hidden_dim/head_dim % 8 == 0, got {dim} and {conv_size}"
+            assert (dim % 8 == 0) and (conv_size in [2, 3, 4]), (
+                f"Causal conv1d only supports conv_size in [2, 3, 4] and hidden_dim/head_dim % 8 == 0, got {dim} and {conv_size}"
+            )
             self.conv_dim = self.dim
             self.conv_weight = nn.Parameter(torch.empty((self.conv_dim, conv_size)))
 
@@ -92,7 +91,11 @@ class RGLRU(nn.Module):
         self.a_gate = nn.Linear(n_heads * head_dim, dim, bias=False)
 
     def forward(
-        self, x: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        x: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
         bsz, seqlen, _ = x.shape
 
@@ -178,9 +181,9 @@ class RGLRUBlock(nn.Module):
         if lru_dim_multiplier is not None:
             hidden_dim = int(lru_dim_multiplier * hidden_dim)
         hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-        assert (
-            hidden_dim % n_heads == 0
-        ), f"Hidden dim must be divisible by n_heads: {hidden_dim} % {n_heads} != 0"
+        assert hidden_dim % n_heads == 0, (
+            f"Hidden dim must be divisible by n_heads: {hidden_dim} % {n_heads} != 0"
+        )
 
         self.dim = dim
         self.hidden_dim = hidden_dim
@@ -211,7 +214,11 @@ class RGLRUBlock(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        x: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
         h = self.rglru(self.wx(x), tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)
         h = h * F.silu(self.wy(x))
@@ -261,9 +268,15 @@ class HawkBlock(nn.Module):
         self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
 
     def forward(
-        self, x: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        x: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
-        x = x + self.rlgru_block(self.rlgru_norm(x), tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)
+        x = x + self.rlgru_block(
+            self.rlgru_norm(x), tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl
+        )
         x = x + self.feed_forward(self.ffn_norm(x))
         return x
 
@@ -287,7 +300,11 @@ class BaseHawk(nn.Module):
             self.layers.append(HawkBlock(args))
 
     def forward(
-        self, h: torch.Tensor, tok_idx: torch.Tensor, cu_seqlens: torch.Tensor, impl: str = "parallel"
+        self,
+        h: torch.Tensor,
+        tok_idx: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        impl: str = "parallel",
     ) -> torch.Tensor:
         for i, layer in enumerate(self.layers):
             h = layer(h, tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)

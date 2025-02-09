@@ -1,6 +1,6 @@
 # Template config, need to change dump_dir, data.root_dir and data.tokenizer.path
 
-# dump_dir: !!CHANGETHIS!!
+dump_dir: ./dump
 name: "debug"
 steps: 1000
 probe_freq: 100

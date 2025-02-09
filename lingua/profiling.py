@@ -133,5 +133,5 @@ def maybe_run_profiler(dump_dir, module, config: ProfilerArgs):
             yield profiler
 
     else:
-        torch_profiler = contextlib.nullcontext()
+        contextlib.nullcontext()
         yield None

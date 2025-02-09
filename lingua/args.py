@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import argparse
 import logging
 from omegaconf import OmegaConf, DictConfig, ListConfig
 from typing import Type, TypeVar
@@ -8,6 +7,7 @@ from typing import Type, TypeVar
 logger = logging.getLogger()
 
 T = TypeVar("T")
+
 
 def set_struct_recursively(cfg, strict: bool = True):
     # Set struct mode for the current level

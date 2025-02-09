@@ -19,7 +19,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 from torch.distributed import ReduceOp
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed._composable.fsdp import MixedPrecisionPolicy, fully_shard
@@ -33,7 +32,6 @@ from torch.utils.checkpoint import (
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 # for no recompute ops
-import xformers.ops
 
 from lingua.float8 import convert_linears_to_fp8
 
@@ -53,9 +51,7 @@ default_no_recompute_ops = {
 
 @dataclass
 class DistributedArgs:
-    dp_shard: int = (
-        1  # In how many shard to split the model weight. Typically number gpu in a node.
-    )
+    dp_shard: int = 1  # In how many shard to split the model weight. Typically number gpu in a node.
     dp_replicate: int = (
         1  # How many times to replicate the model weight. Typically number of nodes.
     )
@@ -97,9 +93,9 @@ def get_device_mesh(distributed_args: DistributedArgs):
     dp_replicate = distributed_args.dp_replicate
     dp_shard = distributed_args.dp_shard
 
-    assert (
-        dp_replicate * dp_shard * tp_size == get_world_size()
-    ), f"dp_replicate * dp_shard * tp_size ({dp_replicate} * {dp_shard} * {tp_size}) != world_size ({get_world_size()})"
+    assert dp_replicate * dp_shard * tp_size == get_world_size(), (
+        f"dp_replicate * dp_shard * tp_size ({dp_replicate} * {dp_shard} * {tp_size}) != world_size ({get_world_size()})"
+    )
 
     dims = []
     names = []
@@ -267,7 +263,7 @@ def setup_torch_distributed(dist_args):
     if dist_args.matmul_allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
         logger.warning(
-            f"WARNING: Setting torch.backends.matmul.allow_tf32 to True. This is faster but less accurate."
+            "WARNING: Setting torch.backends.matmul.allow_tf32 to True. This is faster but less accurate."
         )
     torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
         dist_args.allow_bf16_reduced_precision_reduction
@@ -315,7 +311,9 @@ def check_model_value_range(
             param = param.to_local()
 
         if param.numel() == 0:
-            logger.warning(f"Model parameter {name} is empty, probably because of FSDP sharding")
+            logger.warning(
+                f"Model parameter {name} is empty, probably because of FSDP sharding"
+            )
             continue
 
         if torch.isnan(param).any() or torch.isinf(param).any():
@@ -393,13 +391,13 @@ def parallelize_model(
     no_recompute_ops=None,
 ):
     if distributed_args.tp_size > 1:
-        assert (
-            distributed_args.fsdp_type == "full_shard"
-        ), "Only full shard is supported for TP parallelism"
+        assert distributed_args.fsdp_type == "full_shard", (
+            "Only full shard is supported for TP parallelism"
+        )
         assert tp_parallelize is not None, "TP plan is required for TP parallelism"
-        assert (
-            distributed_args.compile == False
-        ), "Compile is not supported for TP parallelism"
+        assert not distributed_args.compile, (
+            "Compile is not supported for TP parallelism"
+        )
 
         tp_parallelize(model, device_mesh["tp"], model_args, distributed_args)
 
@@ -418,12 +416,12 @@ def parallelize_model(
         or distributed_args.fsdp_type == "no_shard"
     ):
         if distributed_args.fsdp_type == "no_shard":
-            assert (
-                distributed_args.dp_shard == 1
-            ), "dp_shard must be 1 for no_shard fsdp_type"
-            assert (
-                device_mesh["dp_shard"].size() == 1
-            ), "dp_shard must be 1 for no_shard fsdp_type"
+            assert distributed_args.dp_shard == 1, (
+                "dp_shard must be 1 for no_shard fsdp_type"
+            )
+            assert device_mesh["dp_shard"].size() == 1, (
+                "dp_shard must be 1 for no_shard fsdp_type"
+            )
 
         fsdp_config = dict(
             mp_policy=(

@@ -152,7 +152,6 @@ def lengths_to_start_ids(lengths):
 
 def lengths_to_local_ids(lengths):
     assert lengths.ndim == 1
-    nb_seqs = lengths.size(0)
     total_seqlen = lengths.sum()
     # This gives the document id of each token
     doc_id = torch.repeat_interleave(lengths)
@@ -291,6 +290,7 @@ class RMSNorm(nn.Module):
     def reset_parameters(self):
         torch.nn.init.ones_(self.weight)  # type: ignore
 
+
 class TiedLinear(nn.Module):
     def __init__(self, tied_module: nn.Module) -> None:
         super().__init__()
@@ -302,6 +302,7 @@ class TiedLinear(nn.Module):
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         return F.linear(x, self.tied_module.weight)
+
 
 class Attention(nn.Module):
     def __init__(
@@ -497,9 +498,9 @@ class TransformerBlock(nn.Module):
     def __init__(self, args: BaseTransformerArgs):
         super().__init__()
 
-        assert (args.head_dim is not None) or (
-            args.n_heads is not None
-        ), "Should specify at least head_dim or n_heads"
+        assert (args.head_dim is not None) or (args.n_heads is not None), (
+            "Should specify at least head_dim or n_heads"
+        )
         self.head_dim = args.head_dim or args.dim // args.n_heads
         self.n_heads = args.n_heads or args.dim // args.head_dim
         self.n_kv_heads = args.n_kv_heads or self.n_heads
@@ -531,7 +532,6 @@ class TransformerBlock(nn.Module):
         mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
         attn_impl: str = "sdpa",
     ) -> torch.Tensor:
-
         h = x + self.attention(
             self.attention_norm(x),
             freq_cis,
@@ -574,7 +574,6 @@ class BaseTransformer(nn.Module):
         mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
         attn_impl: str = "sdpa",
     ):
-
         freq_cis = self.rope_embeddings(seqlen=self.max_seqlen, tok_idx=tok_idx)
 
         for i, layer in enumerate(self.layers):

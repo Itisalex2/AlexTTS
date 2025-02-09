@@ -50,7 +50,7 @@ class LogFormatter(logging.Formatter):
             if content[-1:] != "\n":
                 content = content + "\n" + indent
             content = content + indent.join(
-                [l + "\n" for l in record.exc_text.splitlines()]
+                [line + "\n" for line in record.exc_text.splitlines()]
             )
             if content[-1:] == "\n":
                 content = content[:-1]
@@ -58,7 +58,9 @@ class LogFormatter(logging.Formatter):
             if content[-1:] != "\n":
                 content = content + "\n" + indent
             stack_text = self.formatStack(record.stack_info)
-            content = content + indent.join([l + "\n" for l in stack_text.splitlines()])
+            content = content + indent.join(
+                [line + "\n" for line in stack_text.splitlines()]
+            )
             if content[-1:] == "\n":
                 content = content[:-1]
 

@@ -62,7 +62,6 @@ def causal_mask(b, h, q_idx, kv_idx):
 
 @dataclass
 class LMTransformerArgs(BaseTransformerArgs):
-
     seed: int = 42
 
     vocab_size: int = -1

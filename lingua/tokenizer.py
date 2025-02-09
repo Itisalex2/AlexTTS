@@ -128,7 +128,6 @@ TIKTOKEN_MAX_ENCODE_CHARS = 400_000
 
 
 class TikTokenTokenizer(Tokenizer):
-
     def __init__(self, model_path: str) -> None:
         mergeable_ranks = load_tiktoken_bpe(model_path)
         all_special_tokens_with_ids = copy(DEFAULT_TIKTOKEN_SPECIAL_TOKENS)

@@ -12,7 +12,6 @@ from apps.fastRNN.minLSTM.core_lstm import BaseMinLSTMArgs, BaseMinLSTM
 
 @dataclass
 class LMMinLSTMArgs(BaseMinLSTMArgs):
-
     seed: int = 42
 
     vocab_size: int = -1
@@ -51,7 +50,6 @@ class LMMinLSTM(BaseMinLSTM):
         cu_seqlens: Optional[int] = None,
         impl: str = "parallel",
     ) -> torch.Tensor:
-
         h = self.tok_embeddings(token_values)
 
         h = super().forward(h, tok_idx=tok_idx, cu_seqlens=cu_seqlens, impl=impl)

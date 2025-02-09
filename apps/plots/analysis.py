@@ -39,8 +39,8 @@ def load_raw_jsonl(jsonl_file):
         for i, line in enumerate(f):
             try:
                 json_obj = json.loads(line)
-            except json.decoder.JSONDecodeError as e:
-                print(f"Error decoding line {i+1} in file {jsonl_file}")
+            except json.decoder.JSONDecodeError:
+                print(f"Error decoding line {i + 1} in file {jsonl_file}")
 
             metrics.append(json_obj)
 
