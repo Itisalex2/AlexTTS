@@ -17,3 +17,10 @@ repos:
         language: system
         pass_filenames: false  
         types: [python]
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
