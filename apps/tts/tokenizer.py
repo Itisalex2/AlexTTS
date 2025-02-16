@@ -12,16 +12,16 @@ logger = logging.getLogger(__name__)
 class MisakiTokenizer(Tokenizer):
     def __init__(self, use_transformer: bool = False, british: bool = False):
         self.phonemizer = en.G2P(trf=use_transformer, british=british, fallback=None)
-        self.phoneme_dict = self.build_phoneme_dict()
-        self.punctuation_dict = self.build_puncutation_dict()
+        self.phoneme_dict = self._build_phoneme_dict()
+        self.punctuation_dict = self._build_puncutation_dict()
         self.whitespace_dict = {w: i + 300 for i, w in enumerate(string.whitespace)}
-        self.special_tokens_dict = self.build_special_tokens_dict()
+        self.special_tokens_dict = self._build_special_tokens_dict()
 
     def encode(
         self, text: str, add_bos: bool = True, add_eos: bool = True
     ) -> List[int]:
         phonemes, _ = self.phonemizer(text)
-        tokens = self.phoneme_to_int(
+        tokens = self._phoneme_to_int(
             phonemes
         )  # Phonemes include punctuation for Misaki
 
@@ -38,7 +38,7 @@ class MisakiTokenizer(Tokenizer):
     def get_token_offsets(self, text: str) -> Tuple[List[str], List[int]]:
         raise NotImplementedError
 
-    def phoneme_to_int(self, phonemes: str) -> List[int]:
+    def _phoneme_to_int(self, phonemes: str) -> List[int]:
         ids = []
         print(phonemes)
         for p in phonemes:
@@ -57,7 +57,7 @@ class MisakiTokenizer(Tokenizer):
 
         return ids
 
-    def build_puncutation_dict(self) -> Dict[str, int]:
+    def _build_puncutation_dict(self) -> Dict[str, int]:
         dict = {p: i + 200 for i, p in enumerate(string.punctuation)}
         assert len(dict) < 50
 
@@ -67,7 +67,7 @@ class MisakiTokenizer(Tokenizer):
 
         return dict
 
-    def build_phoneme_dict(self) -> Dict[str, int]:
+    def _build_phoneme_dict(self) -> Dict[str, int]:
         phoneme_dict = {
             # Stress Marks
             "ˈ": 1,
@@ -132,6 +132,6 @@ class MisakiTokenizer(Tokenizer):
 
         return phoneme_dict
 
-    def build_special_tokens_dict(self) -> Dict[str, int]:
+    def _build_special_tokens_dict(self) -> Dict[str, int]:
         dict = {"SOS": 100, "EOS": 101, "PAD": 102}
         return dict
