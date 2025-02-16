@@ -1,10 +1,13 @@
-import logging
-
 from lingua.tokenizer import Tokenizer
-
 from misaki import en
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Union
+from audiotools import AudioSignal
+from pathlib import Path
+from torch import Tensor
 import string
+import logging
+import dac
+
 
 logger = logging.getLogger(__name__)
 
@@ -135,3 +138,46 @@ class MisakiTokenizer(Tokenizer):
     def _build_special_tokens_dict(self) -> Dict[str, int]:
         dict = {"SOS": 100, "EOS": 101, "PAD": 102}
         return dict
+
+
+class DacTokenizer(Tokenizer):
+    def __init__(self, model: dac.DAC):
+        self.model = model
+
+    def encode(self, audio_input: Union[str, Path, Tensor]) -> dac.DACFile:
+        if isinstance(audio_input, (str, Path)):
+            signal = AudioSignal(audio_input)
+        elif isinstance(audio_input, Tensor):
+            if audio_input.dim() != 3:
+                raise ValueError("Expected tensor with 3 dimensions.")
+            signal = AudioSignal(audio_input, sample_rate=self.model.sample_rate)
+        else:
+            raise TypeError(
+                "Unsupported audio input type. Expected file path or torch.Tensor."
+            )
+
+        signal.to(self.model.device)
+        compressed = self.model.compress(signal)
+        return compressed
+
+    def decode(
+        self, compressed_input: Union[str, Path, dac.DACFile, Tensor]
+    ) -> Union[AudioSignal, Tensor]:
+        if isinstance(compressed_input, (str, Path, dac.DACFile)):
+            reconstructed_signal = self.model.decompress(
+                compressed_input
+            )  # Audio signal
+        elif isinstance(compressed_input, Tensor):
+            if compressed_input.dim() != 3:
+                raise ValueError("Expected tensor with 3 dimensions.")
+            compressed_input = compressed_input.float()
+            reconstructed_signal = self.model.decode(compressed_input)  # Tensor
+        else:
+            raise TypeError(
+                "Unsupported compressed input type. Expected dac.DACFile or torch.Tensor."
+            )
+
+        return reconstructed_signal
+
+    def get_token_offsets(self):
+        raise NotImplementedError
