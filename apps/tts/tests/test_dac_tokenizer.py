@@ -1,10 +1,12 @@
+import gc
+from pathlib import Path
+
+import dac
 import pytest
 import torch
-import dac
-import gc
-from ..tokenizer import DacTokenizer
-from pathlib import Path
 from audiotools import AudioSignal
+
+from ..tokenizer import DacTokenizer
 
 TEST_DIR = Path(__file__).parent
 SAMPLE_AUDIO_DIR = TEST_DIR / "sample_audio"
@@ -102,7 +104,7 @@ def test_decode_from_tensor(tokenizer):
     audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
     audio_signal = AudioSignal(audio_file_path)
     compressed = tokenizer.model.compress(audio_signal)
-    codes = compressed.codes  # Shape: [B, N, T]
+    codes = compressed.codes  # Shape: [B, Q, T]
 
     # Move codes to cuda if available
     device = next(tokenizer.model.parameters()).device
