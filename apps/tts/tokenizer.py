@@ -43,7 +43,6 @@ class MisakiTokenizer(Tokenizer):
 
     def _phoneme_to_int(self, phonemes: str) -> List[int]:
         ids = []
-        print(phonemes)
         for p in phonemes:
             if p in self.phoneme_dict:
                 ids.append(self.phoneme_dict[p])
@@ -55,7 +54,7 @@ class MisakiTokenizer(Tokenizer):
                 ids.append(self.special_tokens_dict[p])
             else:
                 raise Exception(
-                    f"Character: {p} not in phoneme or puncutation dictionary!"
+                    f"Character: {p} not in phoneme, puncutation, whitespace, or special tokens dictionary!"
                 )
 
         return ids
@@ -64,9 +63,11 @@ class MisakiTokenizer(Tokenizer):
         dict = {p: i + 200 for i, p in enumerate(string.punctuation)}
         assert len(dict) < 50
 
+        # Characters that aren't in the standard punctuation dictionary
         dict["“"] = 250
         dict["”"] = 251
         dict["❓"] = 252
+        dict["—"] = 253
 
         return dict
 
