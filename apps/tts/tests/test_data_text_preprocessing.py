@@ -185,7 +185,7 @@ def test_apply_text_tokenizer_replaces_text(dummy_dataset):
 
     for i, sample in enumerate(dummy_dataset["train"]):
         expected_tokens = tokenizer.encode(sample["text"], add_bos=True, add_eos=True)
-        assert processed_ds["train"][i]["text"] == expected_tokens
+        assert processed_ds["train"][i]["text_tokens"] == expected_tokens
 
 
 def test_apply_text_tokenizer_preserves_non_text_fields(dummy_dataset):

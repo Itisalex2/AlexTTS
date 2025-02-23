@@ -3,6 +3,7 @@ from misaki import en
 from typing import List, Tuple, Dict, Union
 from audiotools import AudioSignal
 from pathlib import Path
+import torch
 from torch import Tensor
 import string
 import logging
@@ -182,3 +183,16 @@ class DacTokenizer(Tokenizer):
 
     def get_token_offsets(self):
         raise NotImplementedError
+
+
+def create_dac_tokenizer_model(model_type: str = "16khz") -> dac.DAC:
+    try:
+        model_path = dac.utils.download(model_type=model_type)
+    except Exception as e:
+        raise RuntimeError(f"Failed to download or load the DAC model: {e}")
+    model = dac.DAC.load(model_path)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    return model

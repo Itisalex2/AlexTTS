@@ -1,12 +1,12 @@
 import gc
 from pathlib import Path
 
-import dac
 import pytest
 import torch
 from audiotools import AudioSignal
 
 from ..tokenizer import DacTokenizer
+import dac
 
 TEST_DIR = Path(__file__).parent
 SAMPLE_AUDIO_DIR = TEST_DIR / "sample_audio"
