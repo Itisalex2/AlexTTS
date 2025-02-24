@@ -20,6 +20,7 @@ class MisakiTokenizer(Tokenizer):
         self.punctuation_dict = self._build_puncutation_dict()
         self.whitespace_dict = {w: i + 300 for i, w in enumerate(string.whitespace)}
         self.special_tokens_dict = self._build_special_tokens_dict()
+        self.pad_id = 0
 
     def encode(
         self, text: str, add_bos: bool = True, add_eos: bool = True
@@ -138,13 +139,14 @@ class MisakiTokenizer(Tokenizer):
         return phoneme_dict
 
     def _build_special_tokens_dict(self) -> Dict[str, int]:
-        dict = {"SOS": 100, "EOS": 101, "PAD": 102}
+        dict = {"SOS": 100, "EOS": 101}
         return dict
 
 
 class DacTokenizer(Tokenizer):
     def __init__(self, model: dac.DAC):
         self.model = model
+        self.pad_id = 0
 
     def encode(self, audio_input: Union[str, Path, Tensor]) -> dac.DACFile:
         if isinstance(audio_input, (str, Path)):

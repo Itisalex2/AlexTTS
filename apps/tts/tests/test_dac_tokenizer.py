@@ -42,6 +42,7 @@ def clear_cuda_memory_after_test():
 
 def test_instantiation(tokenizer: DacTokenizer):
     assert tokenizer is not None
+    assert tokenizer.pad_id == 0
 
 
 def test_encode_from_file(tokenizer):

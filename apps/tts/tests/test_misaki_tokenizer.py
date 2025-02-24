@@ -8,6 +8,11 @@ def tokenizer() -> MisakiTokenizer:
     return tok
 
 
+def test_instantiation(tokenizer: MisakiTokenizer):
+    assert tokenizer is not None
+    assert tokenizer.pad_id == 0
+
+
 def test_phoneme_dict(tokenizer: MisakiTokenizer):
     assert tokenizer.phoneme_dict.get("ˈ") == 1
     assert tokenizer.phoneme_dict.get("b") == 3
@@ -37,7 +42,6 @@ def test_whitespace_dict(tokenizer: MisakiTokenizer):
 def test_special_tokens_dict(tokenizer: MisakiTokenizer):
     assert tokenizer.special_tokens_dict.get("SOS") == 100
     assert tokenizer.special_tokens_dict.get("EOS") == 101
-    assert tokenizer.special_tokens_dict.get("PAD") == 102
 
 
 def test_encode(tokenizer: MisakiTokenizer):
