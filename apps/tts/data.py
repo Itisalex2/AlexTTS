@@ -3,7 +3,7 @@ from typing import Dict, List
 from lingua.tokenizer import Tokenizer
 from .tokenizer import MisakiTokenizer, DacTokenizer, create_dac_tokenizer_model
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from torch.nn.utils.rnn import pad_sequence
 
@@ -47,8 +47,8 @@ class TTSCollator:
         audio_padded = audio_padded.permute(0, 2, 1)  # [B, Q, T]
 
         text_mask = (text_padded != self.text_pad_id).float()
-        audio_mask = (audio_padded != self.audio_pad_id).all(dim=1).float()
-        combined_mask = torch.cat([text_mask, audio_mask], dim=1)
+        audio_mask = (audio_padded != self.audio_pad_id).any(dim=1)
+        combined_mask = torch.cat([text_mask, audio_mask], dim=1).bool()
 
         return {
             "text_tokens": text_padded,
@@ -167,6 +167,25 @@ def main():
     gigaspeech = apply_audio_tokenizer(gigaspeech, dac_tokenizer)
 
     save_to_pt_files(gigaspeech, SPLITS, DATA_DIR)
+
+    train_dataset = TTSDataset("train", DATA_DIR)
+    collator = TTSCollator(
+        text_pad_id=misaki_tokenizer.pad_id, audio_pad_id=dac_tokenizer.pad_id
+    )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=4,
+        collate_fn=collator,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
+
+    for batch in train_loader:
+        print("Text tokens shape:", batch["text_tokens"].shape)
+        print("Audio tokens shape:", batch["audio_tokens"].shape)
+        print("Attention mask shape:", batch["attention_mask"].shape)
+        break
 
 
 if __name__ == "__main__":

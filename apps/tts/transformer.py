@@ -23,6 +23,8 @@ class TTSTransformerArgs(BaseTransformerArgs):
     quantizer_max_weight: float = 1
     quantizer_min_weight: float = 0.5
 
+    n_heads: int = 8
+
 
 class TTSTransformer(BaseTransformer):
     def __init__(self, args: TTSTransformerArgs):
@@ -133,6 +135,7 @@ class TTSTransformer(BaseTransformer):
                     cross_entropy(
                         logits[:, i].contiguous().view(-1, self.audio_vocab_size),
                         target[:, i].contiguous().view(-1),
+                        ignore_index=self.audio_pad_id,
                     )
                 )
 
