@@ -6,6 +6,12 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 from torch.nn.utils.rnn import pad_sequence
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 
 class TTSDataset(Dataset):
@@ -57,6 +63,13 @@ class TTSCollator:
             "texts": [sample["text"] for sample in batch],
             "audio": [sample["audio"] for sample in batch],
         }
+
+
+def filter_empty_audio(dataset: DatasetDict) -> DatasetDict:
+    def _is_valid(sample):
+        return len(sample["audio"]["array"]) > 0
+
+    return dataset.filter(_is_valid)
 
 
 def get_useful_fields(dataset: DatasetDict, columns_to_keep: list[str]) -> DatasetDict:
@@ -137,6 +150,20 @@ def save_to_pt_files(dataset: DatasetDict, splits: List[str], data_dir: Path):
             )
 
 
+def get_max_lengths(dataset: Dataset):
+    max_text_len = 0
+    max_audio_len = 0
+
+    for sample in dataset:
+        text_len = len(sample["text_tokens"])
+        audio_len = sample["audio_tokens"].shape[1]
+
+        max_text_len = max(max_text_len, text_len)
+        max_audio_len = max(max_audio_len, audio_len)
+
+    return max_text_len, max_audio_len
+
+
 def main():
     # For the gigaspeech dataset ONLY
     punctuation_mappings = {
@@ -153,20 +180,29 @@ def main():
     SPLITS = ["train", "validation", "test"]
 
     gigaspeech = load_dataset("speechcolab/gigaspeech", "xs")
+
     gigaspeech = DatasetDict(
         {
-            "train": gigaspeech["train"].select(range(7)),
-            "validation": gigaspeech["validation"].select(range(7)),
-            "test": gigaspeech["test"].select(range(7)),
+            "train": gigaspeech["train"],
+            "validation": gigaspeech["validation"],
+            "test": gigaspeech["test"],
         }
     )
+    logger.info("Filtering empty audio samples")
+    gigaspeech = filter_empty_audio(gigaspeech)
     COLUMNS_TO_KEEP = ["text", "audio"]
+    logger.info("Filtering useful fields\n")
     gigaspeech = get_useful_fields(gigaspeech, COLUMNS_TO_KEEP)
+    logger.info("Done filtering useful fields. Mapping punctuation in dataset\n")
     gigaspeech = map_punctuation_in_dataset(gigaspeech, punctuation_mappings)
+    logger.info("Done mapping punctuation in dataset. Applying text tokenizer\n")
     gigaspeech = apply_text_tokenizer(gigaspeech, misaki_tokenizer)
+    logger.info("Done applying text tokenizer. Applying audio tokenizer\n")
     gigaspeech = apply_audio_tokenizer(gigaspeech, dac_tokenizer)
+    logger.info("Done applying audio tokenizer. Saving to pt files\n")
 
     save_to_pt_files(gigaspeech, SPLITS, DATA_DIR)
+    logger.info("Done saving to pt files. Test loading TTS dataset\n")
 
     train_dataset = TTSDataset("train", DATA_DIR)
     collator = TTSCollator(
@@ -181,11 +217,18 @@ def main():
         pin_memory=True,
     )
 
-    for batch in train_loader:
-        print("Text tokens shape:", batch["text_tokens"].shape)
-        print("Audio tokens shape:", batch["audio_tokens"].shape)
-        print("Attention mask shape:", batch["attention_mask"].shape)
-        break
+    max_text_len, max_audio_len = get_max_lengths(train_dataset)
+    total_seq_length = max_text_len + max_audio_len
+    logger.info(f"Max text length: {max_text_len}")
+    logger.info(f"Max audio length: {max_audio_len}")
+    logger.info(f"Total sequence length: {total_seq_length}")
+
+    # Sanity check
+    for batch_indx, batch in enumerate(train_loader):
+        if batch_indx % 1000 == 0:
+            print("Text tokens shape:", batch["text_tokens"].shape)
+            print("Audio tokens shape:", batch["audio_tokens"].shape)
+            print("Attention mask shape:", batch["attention_mask"].shape)
 
 
 if __name__ == "__main__":
