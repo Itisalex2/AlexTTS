@@ -19,9 +19,11 @@ class TTSTransformerArgs(BaseTransformerArgs):
     seed: int = 42
     text_vocab_size: int = -1
     audio_vocab_size: int = -1
-    num_quantizers: int = -1
+    audio_pad_id: int = 0
+    num_quantizers: int = 12
     quantizer_max_weight: float = 1
-    quantizer_min_weight: float = 0.5
+    quantizer_min_weight: float = 0.0
+    max_seqlen: int = 4096
 
     n_heads: int = 8
 
@@ -35,6 +37,7 @@ class TTSTransformer(BaseTransformer):
 
         self.text_vocab_size = args.text_vocab_size
         self.audio_vocab_size = args.audio_vocab_size
+        self.audio_pad_id = args.audio_pad_id
         self.num_quantizers = args.num_quantizers
         self.dim = args.dim
         self.quantizer_max_weight = args.quantizer_max_weight
@@ -84,17 +87,10 @@ class TTSTransformer(BaseTransformer):
         )
 
         combined_embeddings = torch.cat([text_embeddings, audio_embeddings], dim=1)
-        text_len = text_tokens.size(1)
-        total_len = text_len + audio_t
 
-        if tok_idx is None:
-            positions = torch.arange(total_len, device=text_tokens.device)
-        else:
-            positions = tok_idx
+        mask = self.transform_mask(attn_impl, mask)
 
-        h = super().forward(
-            combined_embeddings, tok_idx=positions, mask=mask, attn_impl=attn_impl
-        )
+        h = super().forward(combined_embeddings, mask=mask, attn_impl=attn_impl)
 
         audio_not_projected = h[:, text_embeddings.size(1) :, :]  # [B, audio_t, D]
 
@@ -144,6 +140,7 @@ class TTSTransformer(BaseTransformer):
                 self.quantizer_max_weight,
                 self.quantizer_min_weight,
                 self.num_quantizers,
+                device=logits.device,
             )
             total_loss = sum(w * loss for w, loss in zip(loss_weights, losses))
             return total_loss, logits
@@ -177,3 +174,14 @@ class TTSTransformer(BaseTransformer):
             a=-3 * (self.dim * self.num_quantizers) ** -0.5,
             b=3 * (self.dim * self.num_quantizers) ** -0.5,
         )
+
+    def transform_mask(
+        self,
+        attn_impl: str,
+        mask: Optional[Union[BlockMask, AttentionBias, torch.Tensor, str]] = None,
+    ):
+        if isinstance(mask, torch.Tensor) and attn_impl == "sdpa":
+            # B, S -> B, 1, 1, S. Necessary for broadcasting in sdpa's F.scaled_dot_product_attention
+            mask = mask.unsqueeze(1).unsqueeze(1)
+
+        return mask

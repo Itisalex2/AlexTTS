@@ -21,6 +21,7 @@ class MisakiTokenizer(Tokenizer):
         self.whitespace_dict = {w: i + 300 for i, w in enumerate(string.whitespace)}
         self.special_tokens_dict = self._build_special_tokens_dict()
         self.pad_id = 0
+        self.vocab_size = 306
 
     def encode(
         self, text: str, add_bos: bool = True, add_eos: bool = True
@@ -147,6 +148,7 @@ class DacTokenizer(Tokenizer):
     def __init__(self, model: dac.DAC):
         self.model = model
         self.pad_id = 0
+        self.vocab_size = 1024
 
     def encode(self, audio_input: Union[str, Path, Tensor]) -> dac.DACFile:
         if isinstance(audio_input, (str, Path)):

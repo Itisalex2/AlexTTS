@@ -11,8 +11,10 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim import AdamW, Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from torch.amp import GradScaler
 
 from .data import TTSCollator, TTSDataset
+from .tokenizer import DacTokenizer, MisakiTokenizer, create_dac_tokenizer_model
 from .transformer import TTSTransformer, TTSTransformerArgs
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ class TrainingConfig:
     epochs: int = 100
     batch_size: int = 8
     learning_rate: float = 3e-4
+    max_learning_rate: float = 9e-4
     grad_accum_steps: int = 1
     grad_clip_norm: float = 1.0
     optimizer: str = "AdamW"
@@ -42,7 +45,7 @@ class TrainingConfig:
     validation_freq: int = 1
     resume_checkpoint: Optional[Path] = None
 
-    def post_init__(self):
+    def __post_init__(self):
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -75,7 +78,7 @@ class CheckpointState:
 
     @classmethod
     def load(cls, path: Path, device: torch.device) -> "CheckpointState":
-        checkpoint = torch.load(path, map_location=device)
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
         return cls(
             model_state=checkpoint["model_state"],
             optimizer_state=checkpoint["optimizer_state"],
@@ -101,6 +104,7 @@ class DistributedTTSTrainer:
         self.scheduler = self._create_scheduler()
 
         self.state = TrainerState()
+        self.scaler = GradScaler()
         if self.config.resume_checkpoint:
             self.load_checkpoint()
 
@@ -116,9 +120,12 @@ class DistributedTTSTrainer:
         if self.config.lr_scheduler == "OneCycleLR":
             return torch.optim.lr_scheduler.OneCycleLR(
                 self.optimizer,
-                max_lr=self.config.learning_rate,
+                max_lr=self.config.max_learning_rate,
                 total_steps=self.config.epochs
-                * (len(self.train_loader) // self.config.grad_accum_steps),
+                * (
+                    (len(self.train_loader) + self.config.grad_accum_steps - 1)
+                    // self.config.grad_accum_steps
+                ),
             )
         else:
             return NotImplementedError(
@@ -160,6 +167,7 @@ class DistributedTTSTrainer:
             collate_fn=collator_fn,
             num_workers=self.config.num_workers,
             pin_memory=True,
+            drop_last=False,
         )
 
         return train_loader, val_loader
@@ -192,7 +200,11 @@ class DistributedTTSTrainer:
 
         self.state = checkpoint.trainer_state
 
-        dist.broadcast_object_list([self.state.epoch, self.state.global_step], src=0)
+        obj_list = [self.state.epoch, self.state.global_step]
+        dist.broadcast_object_list(obj_list, src=0)
+        self.state.epoch = obj_list[0]
+        self.state.global_step = obj_list[1]
+
         logger.info(
             f"Resumed training from {self.config.resume_checkpoint} at epoch {self.state.epoch}"
         )
@@ -204,18 +216,20 @@ class DistributedTTSTrainer:
         accum_steps = 0
 
         for batch_idx, batch in enumerate(self.train_loader):
-            batch = {k: v.to(self.device) for k, v in batch.items()}
+            batch = {
+                k: v.to(self.device) for k, v in batch.items() if torch.is_tensor(v)
+            }
 
             with torch.autocast(device_type="cuda", dtype=torch.float16):
                 loss, _ = self.model(
                     text_tokens=batch["text_tokens"],
                     audio_tokens=batch["audio_tokens"][:, :, :-1],
                     target=batch["audio_tokens"][:, :, 1:],
-                    mask=batch["attention_mask"],
+                    mask=batch["attention_mask"][:, :-1],
                 )
 
             scaled_loss = loss / self.config.grad_accum_steps
-            scaled_loss.backward()
+            self.scaler.scale(scaled_loss).backward()
             total_loss += loss.item()
             accum_steps += 1
 
@@ -234,8 +248,10 @@ class DistributedTTSTrainer:
                 total_loss = 0.0
                 accum_steps = 0
 
+                self.scaler.unscale_(self.optimizer)
                 clip_grad_norm_(self.model.parameters(), self.config.grad_clip_norm)
-                self.optimizer.step()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
                 self.optimizer.zero_grad()
                 self.scheduler.step()
                 self.state.global_step += 1
@@ -253,13 +269,13 @@ class DistributedTTSTrainer:
         with torch.no_grad():
             for batch in self.val_loader:
                 batch = {k: v.to(self.device) for k, v in batch.items()}
-                with torch.autocast(device_type="cuda", dtype=torch.float16):
-                    loss, _ = self.model(
-                        text_tokens=batch["text_tokens"],
-                        audio_tokens=batch["audio_tokens"][:, :, :-1],
-                        target=batch["audio_tokens"][:, :, 1:],
-                        mask=batch["attention_mask"],
-                    )
+
+                loss, _ = self.model(
+                    text_tokens=batch["text_tokens"],
+                    audio_tokens=batch["audio_tokens"][:, :, :-1],
+                    target=batch["audio_tokens"][:, :, 1:],
+                    mask=batch["attention_mask"][:, :-1],
+                )
 
                 loss_tensor = torch.tensor(loss.item(), device=self.device)
                 dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
@@ -285,7 +301,14 @@ def setup_distributed(config: TrainingConfig) -> torch.device:
 def train(config: TrainingConfig):
     device = setup_distributed(config)
 
-    ttsTransformerArgs = TTSTransformerArgs()
+    dac_model = create_dac_tokenizer_model("16khz")
+    dac_tokenizer = DacTokenizer(dac_model)
+    misaki_tokenizer = MisakiTokenizer()
+
+    ttsTransformerArgs = TTSTransformerArgs(
+        text_vocab_size=misaki_tokenizer.vocab_size,
+        audio_vocab_size=dac_tokenizer.vocab_size,
+    )
     model = TTSTransformer(ttsTransformerArgs)
 
     trainer = DistributedTTSTrainer(config, model, device)
