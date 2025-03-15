@@ -46,8 +46,6 @@ class BaseTransformerArgs:
     init_base_std: Optional[float] = None
     init_std_factor: str = "disabled"
 
-    max_seqlen: int = 1024
-
 
 def cross_entropy(pred, target, **kwargs):
     return F.nll_loss(
@@ -70,7 +68,12 @@ def repeat_kv(x: torch.Tensor, n_rep: int, dim: int) -> torch.Tensor:
     )
 
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+def precompute_freqs_cis(
+    dim: int,
+    end: int,
+    theta: float = 10000.0,
+    device: torch.device = torch.device("cpu"),
+):
     """
     Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
 
@@ -86,8 +89,10 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     Returns:
         torch.Tensor: Precomputed frequency tensor with complex exponentials.
     """
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)
+    freqs = 1.0 / (
+        theta ** (torch.arange(0, dim, 2, device=device)[: (dim // 2)].float() / dim)
+    )
+    t = torch.arange(end, device=device)
     freqs = torch.outer(t, freqs).float()
 
     cos, sin = freqs.cos(), freqs.sin()
@@ -223,26 +228,17 @@ class RotaryEmbedding(torch.nn.Module):
     RotaryEmbedding Module
     """
 
-    def __init__(self, theta: float, head_dim: int, max_seqlen: int = 1024):
+    def __init__(self, theta: float, head_dim: int):
         super().__init__()
 
         self.theta = theta
         self.head_dim = head_dim
-        self.max_seqlen = max_seqlen
-
-        self.register_buffer(
-            "freqs_cis",
-            precompute_freqs_cis(dim=head_dim, end=max_seqlen, theta=theta),
-            persistent=False,
-        )
-
-    def reset_parameters(self):
-        self.freqs_cis[...] = precompute_freqs_cis(
-            dim=self.head_dim, end=self.max_seqlen, theta=self.theta
-        )
 
     def forward(
-        self, seqlen: Optional[int] = None, tok_idx: Optional[torch.Tensor] = None
+        self,
+        seqlen: Optional[int] = None,
+        tok_idx: Optional[torch.Tensor] = None,
+        device=None,
     ):
         """
         Return freqs_cis corresponding to consecutive seqlen positions or the corresponding tok_idx positions
@@ -253,12 +249,17 @@ class RotaryEmbedding(torch.nn.Module):
         Returns:
             Tuple(torch.Tensor, torch.Tensor): Embedded input tensor and freqs_cis
         """
-        test = (seqlen is not None) or (tok_idx is not None)
-        assert test, "Should provide atleast seqlen or tok_idx"
+
         if tok_idx is not None:
-            return self.freqs_cis[tok_idx]
+            end = tok_idx.max() + 1
         elif seqlen is not None:
-            return self.freqs_cis[0:seqlen]
+            end = seqlen
+        else:
+            raise ValueError("Must provide seqlen or tok_idx")
+
+        return precompute_freqs_cis(
+            dim=self.head_dim, end=end, theta=self.theta, device=device
+        )
 
 
 class RMSNorm(nn.Module):
@@ -557,11 +558,9 @@ class BaseTransformer(nn.Module):
         self.dim = args.dim
         self.init_base_std = args.init_base_std
         self.init_std_factor = InitStdFactor(args.init_std_factor)
-        self.max_seqlen = args.max_seqlen
         self.rope_embeddings = RotaryEmbedding(
             theta=args.rope_theta,
             head_dim=args.head_dim or args.dim // cast(int, args.n_heads),
-            max_seqlen=args.max_seqlen,
         )
 
         self.layers = nn.ModuleList()
@@ -575,7 +574,10 @@ class BaseTransformer(nn.Module):
         mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
         attn_impl: str = "sdpa",
     ):
-        freq_cis = self.rope_embeddings(seqlen=self.max_seqlen, tok_idx=tok_idx)
+        seq_dim = 1
+        seq_len = h.size(seq_dim)
+        device = h.device
+        freq_cis = self.rope_embeddings(seqlen=seq_len, tok_idx=tok_idx, device=device)
 
         for i, layer in enumerate(self.layers):
             h = layer(h, freq_cis, tok_idx=tok_idx, mask=mask, attn_impl=attn_impl)
@@ -583,7 +585,8 @@ class BaseTransformer(nn.Module):
 
     def reset_parameters(self):
         # Either use fixed base std or sqrt model dim
-        self.rope_embeddings.reset_parameters()
+        # self.rope_embeddings.reset_parameters() # Removed because dynamic freq_cis is used
+        pass
 
     def init_weights(self):
         self.reset_parameters()

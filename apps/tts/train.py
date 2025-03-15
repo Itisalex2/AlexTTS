@@ -43,6 +43,7 @@ class TrainingConfig:
 
     checkpoint_freq: int = 1
     validation_freq: int = 1
+    validation_epoch_logger_freq: int = 100
     resume_checkpoint: Optional[Path] = None
 
     def __post_init__(self):
@@ -216,45 +217,59 @@ class DistributedTTSTrainer:
         accum_steps = 0
 
         for batch_idx, batch in enumerate(self.train_loader):
-            batch = {
-                k: v.to(self.device) for k, v in batch.items() if torch.is_tensor(v)
-            }
+            try:
+                batch = {
+                    k: v.to(self.device) for k, v in batch.items() if torch.is_tensor(v)
+                }
 
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                loss, _ = self.model(
-                    text_tokens=batch["text_tokens"],
-                    audio_tokens=batch["audio_tokens"][:, :, :-1],
-                    target=batch["audio_tokens"][:, :, 1:],
-                    mask=batch["attention_mask"][:, :-1],
+                with torch.autocast(device_type="cuda", dtype=torch.float16):
+                    loss, _ = self.model(
+                        text_tokens=batch["text_tokens"],
+                        audio_tokens=batch["audio_tokens"][:, :, :-1],
+                        target=batch["audio_tokens"][:, :, 1:],
+                        mask=batch["attention_mask"][:, :-1],
+                    )
+
+                if torch.isnan(loss) or torch.isinf(loss):
+                    logger.warning(
+                        f"NaN/Inf loss detected at batch {batch_idx}, skipping batch."
+                    )
+                    continue
+
+                scaled_loss = loss / self.config.grad_accum_steps
+                self.scaler.scale(scaled_loss).backward()
+                total_loss += loss.item()
+                accum_steps += 1
+
+                if (batch_idx + 1) % self.config.grad_accum_steps == 0:
+                    total_loss_tensor = torch.tensor(total_loss, device=self.device)
+                    dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
+
+                    if self.is_main:
+                        avg_loss = total_loss_tensor.item() / (
+                            accum_steps * dist.get_world_size()
+                        )
+                        logger.info(
+                            f"Epoch {self.state.epoch} Step {self.state.global_step} Batch {batch_idx + 1} Loss: {avg_loss:.4f}"
+                        )
+
+                    total_loss = 0.0
+                    accum_steps = 0
+
+                    self.scaler.unscale_(self.optimizer)
+                    clip_grad_norm_(self.model.parameters(), self.config.grad_clip_norm)
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    self.optimizer.zero_grad()
+                    self.scheduler.step()
+                    self.state.global_step += 1
+            except Exception as e:
+                logger.error(
+                    f"Training: Skipping batch {batch_idx} due to error: {e}",
+                    exc_info=True,
                 )
-
-            scaled_loss = loss / self.config.grad_accum_steps
-            self.scaler.scale(scaled_loss).backward()
-            total_loss += loss.item()
-            accum_steps += 1
-
-            if (batch_idx + 1) % self.config.grad_accum_steps == 0:
-                total_loss_tensor = torch.tensor(total_loss, device=self.device)
-                dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
-
-                if self.is_main:
-                    avg_loss = total_loss_tensor.item() / (
-                        accum_steps * dist.get_world_size()
-                    )
-                    logger.info(
-                        f"Epoch {self.state.epoch} Step {self.state.global_step} Loss: {avg_loss:.4f}"
-                    )
-
-                total_loss = 0.0
-                accum_steps = 0
-
-                self.scaler.unscale_(self.optimizer)
-                clip_grad_norm_(self.model.parameters(), self.config.grad_clip_norm)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad()
-                self.scheduler.step()
-                self.state.global_step += 1
+                logger.error(f"Batch items: {batch.items}")
+                continue
 
         self.state.epoch += 1
 
@@ -264,24 +279,57 @@ class DistributedTTSTrainer:
 
         self.model.eval()
         total_loss = 0.0
-        world_size = dist.get_world_size()
+        total_samples = 0
 
         with torch.no_grad():
-            for batch in self.val_loader:
-                batch = {k: v.to(self.device) for k, v in batch.items()}
+            for batch_idx, batch in enumerate(self.val_loader):
+                try:
+                    batch = {
+                        k: v.to(self.device)
+                        for k, v in batch.items()
+                        if torch.is_tensor(v)
+                    }
 
-                loss, _ = self.model(
-                    text_tokens=batch["text_tokens"],
-                    audio_tokens=batch["audio_tokens"][:, :, :-1],
-                    target=batch["audio_tokens"][:, :, 1:],
-                    mask=batch["attention_mask"][:, :-1],
-                )
+                    loss, _ = self.model(
+                        text_tokens=batch["text_tokens"],
+                        audio_tokens=batch["audio_tokens"][:, :, :-1],
+                        target=batch["audio_tokens"][:, :, 1:],
+                        mask=batch["attention_mask"][:, :-1],
+                    )
 
-                loss_tensor = torch.tensor(loss.item(), device=self.device)
-                dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
-                total_loss += loss_tensor.item() / world_size
+                    num_samples = batch["text_tokens"].size(0)
+                    batch_loss = loss.item() * num_samples
+                    total_loss += batch_loss
+                    total_samples += num_samples
 
-        avg_loss = total_loss / len(self.val_loader)
+                    if (
+                        batch_idx + 1
+                    ) % self.config.validation_epoch_logger_freq == 0 and self.is_main:
+                        avg_loss_so_far = (
+                            total_loss / total_samples if total_samples != 0 else 0.0
+                        )
+                        logger.info(
+                            f"Validation: Batch {batch_idx + 1} Loss: {avg_loss_so_far:.4f}"
+                        )
+
+                except Exception as e:
+                    logger.error(
+                        f"Validation: Skipping batch {batch_idx} due to error: {e}",
+                        exc_info=True,
+                    )
+                    continue
+
+        total_loss_tensor = torch.tensor(total_loss, device=self.device)
+        total_samples_tensor = torch.tensor(total_samples, device=self.device)
+
+        dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(total_samples_tensor, op=dist.ReduceOp.SUM)
+
+        avg_loss = (
+            total_loss_tensor.item() / total_samples_tensor.item()
+            if total_samples_tensor.item() != 0
+            else 0.0
+        )
 
         if self.is_main:
             logger.info(f"Validation Loss: {avg_loss:.4f}")
@@ -327,5 +375,6 @@ def train(config: TrainingConfig):
 
 
 if __name__ == "__main__":
+    # config = TrainingConfig(resume_checkpoint=Path("checkpoints/checkpoint_0002.pt"))
     config = TrainingConfig(resume_checkpoint=None)
     train(config)

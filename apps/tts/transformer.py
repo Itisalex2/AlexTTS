@@ -6,7 +6,7 @@ from torch import Tensor, nn
 from torch.nn.attention.flex_attention import BlockMask
 from xformers.ops import AttentionBias
 
-from lingua.transformer import (
+from .lingua_transformer_modified import (
     BaseTransformer,
     BaseTransformerArgs,
     RMSNorm,
@@ -54,7 +54,7 @@ class TTSTransformer(BaseTransformer):
         self.norm = RMSNorm(self.dim, eps=args.norm_eps)
         self.output = nn.Linear(self.dim, self.audio_vocab_size * self.num_quantizers)
 
-    def forward(
+    def forward(  # type: ignore[override]
         self,
         text_tokens: Tensor,  # [B, text_t]
         audio_tokens: Tensor,  # [B, Q, audio_t]
