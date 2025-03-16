@@ -117,7 +117,10 @@ def apply_audio_tokenizer(dataset: DatasetDict, tokenizer: Tokenizer) -> Dataset
             audio_tensor = audio_tensor.unsqueeze(0).unsqueeze(0)
 
         assert audio_tensor.dim() == 3, "Tensor input must have 3 dimensions"
-        tokenized_audio = tokenizer.encode(audio_tensor).codes.squeeze(0)
+
+        with torch.no_grad():
+            tokenized_audio = tokenizer.encode(audio_tensor).codes.squeeze(0)
+
         assert tokenized_audio.dim() == 2, (
             f"Codes should have 2 dimensions: (num_codebooks, timesteps), but it has size {tokenized_audio.size()}"
         )

@@ -198,5 +198,6 @@ def create_dac_tokenizer_model(model_type: str = "16khz") -> dac.DAC:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    model.eval()
 
     return model
