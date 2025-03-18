@@ -69,13 +69,12 @@ class TTSGenerator:
         assert self.config.batch_size == 1, (
             "For now only consider simple case: batch size = 1"
         )
-        audio_tokens = torch.zeros(
-            self.config.batch_size,
-            self.transformer.num_quantizers,
-            1,
+        audio_tokens = torch.full(
+            (self.config.batch_size, self.transformer.num_quantizers, 1),
+            self.audio_tokenizer.bos_id,
             dtype=torch.long,
             device=self.config.device,
-        )  # [1, Q, 0 (timestep = 1 initially)]
+        )  # [1, Q, 1 (timestep = 1 initially with bos)]
 
         assert audio_tokens.shape == (
             self.config.batch_size,
@@ -89,6 +88,10 @@ class TTSGenerator:
 
             next_token = self._sample_next(next_logits)
             audio_tokens = torch.cat([audio_tokens, next_token], dim=-1)
+
+            if (next_token == self.audio_tokenizer.eos_id).any():
+                audio_tokens = audio_tokens[:, :, :-1]
+                break
 
         waveform = self.audio_tokenizer.decode(audio_tokens)  # [B, 1, audio_t]
         waveform = waveform.squeeze(1).cpu()
