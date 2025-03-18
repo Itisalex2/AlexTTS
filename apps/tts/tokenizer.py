@@ -148,9 +148,16 @@ class DacTokenizer(Tokenizer):
     def __init__(self, model: dac.DAC):
         self.model = model
         self.pad_id = 0
-        self.vocab_size = 1024
+        self.bos_id = 1024
+        self.eos_id = 1025
+        self.vocab_size = 1024 + 1 + 1
 
-    def encode(self, audio_input: Union[str, Path, Tensor]) -> dac.DACFile:
+    def encode(
+        self,
+        audio_input: Union[str, Path, Tensor],
+        add_bos: bool = True,
+        add_eos: bool = True,
+    ) -> dac.DACFile:
         if isinstance(audio_input, (str, Path)):
             signal = AudioSignal(audio_input)
         elif isinstance(audio_input, Tensor):
@@ -164,20 +171,33 @@ class DacTokenizer(Tokenizer):
 
         signal.to(self.model.device)
         compressed = self.model.compress(signal)
+
+        codes = compressed.codes  # [B, Q, T]
+
+        if add_bos:
+            bos_tokens = torch.full((codes.size(0), codes.size(1), 1), self.bos_id).to(
+                self.model.device
+            )
+            compressed.codes = torch.cat([bos_tokens, compressed.codes], dim=-1)
+        if add_eos:
+            eos_tokens = torch.full((codes.size(0), codes.size(1), 1), self.eos_id).to(
+                self.model.device
+            )
+            compressed.codes = torch.cat([compressed.codes, eos_tokens], dim=-1)
+
         return compressed
 
     def decode(
-        self, compressed_input: Union[str, Path, dac.DACFile, Tensor]
+        self, audio_input: Union[str, Path, dac.DACFile, Tensor]
     ) -> Union[AudioSignal, Tensor]:
-        if isinstance(compressed_input, (str, Path, dac.DACFile)):
-            reconstructed_signal = self.model.decompress(
-                compressed_input
-            )  # Audio signal
-        elif isinstance(compressed_input, Tensor):
-            if compressed_input.dim() != 3:
-                raise ValueError("Expected tensor with 3 dimensions.")
-            compressed_input = compressed_input.float()
-            reconstructed_signal = self.model.decode(compressed_input)  # Tensor
+        if isinstance(audio_input, (str, Path, dac.DACFile)):
+            reconstructed_signal = self.model.decompress(audio_input)  # Audio signal
+        elif isinstance(audio_input, Tensor):
+            if audio_input.dim() != 3:
+                raise ValueError(f"Codes must be 3D [B, Q, T], got {audio_input.shape}")
+
+            z, _, _ = self.model.quantizer.from_codes(audio_input)
+            return self.model.decode(z)
         else:
             raise TypeError(
                 "Unsupported compressed input type. Expected dac.DACFile or torch.Tensor."

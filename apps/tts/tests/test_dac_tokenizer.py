@@ -94,6 +94,57 @@ def test_encode_with_unsupported_input_type(tokenizer):
         tokenizer.encode(unsupported_input)
 
 
+def test_bos_token_addition(tokenizer):
+    audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
+
+    compressed = tokenizer.encode(audio_file_path, add_bos=True, add_eos=False)
+    codes = compressed.codes
+
+    assert torch.all(codes[:, :, 0] == tokenizer.bos_id), (
+        "BOS token not found at start of all codebooks"
+    )
+
+    assert not torch.any(codes[:, :, 1:] == tokenizer.bos_id), (
+        "BOS token should not appear in middle of sequence"
+    )
+
+
+def test_eos_token_addition(tokenizer):
+    audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
+
+    compressed = tokenizer.encode(audio_file_path, add_bos=False, add_eos=True)
+    codes = compressed.codes
+
+    assert torch.all(codes[:, :, -1] == tokenizer.eos_id), (
+        "EOS token not found at end of all codebooks"
+    )
+
+    assert not torch.any(codes[:, :, :-1] == tokenizer.eos_id), (
+        "EOS token appears in middle of sequence"
+    )
+
+
+def test_full_token_wrapping(tokenizer):
+    audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
+
+    compressed_raw = tokenizer.encode(audio_file_path, add_bos=False, add_eos=False)
+    original_length = compressed_raw.codes.shape[-1]
+
+    compressed = tokenizer.encode(audio_file_path, add_bos=True, add_eos=True)
+    codes = compressed.codes
+
+    assert codes.shape[-1] == original_length + 2, (
+        f"Expected length {original_length + 2}, got {codes.shape[-1]}"
+    )
+
+    assert torch.all(codes[:, :, 0] == tokenizer.bos_id), "BOS missing"
+    assert torch.all(codes[:, :, -1] == tokenizer.eos_id), "EOS missing"
+
+    assert torch.all(codes[:, :, 1:-1] == compressed_raw.codes), (
+        "Original codes modified between BOS and EOS"
+    )
+
+
 def test_decode_from_dacfile(tokenizer):
     dac_file_path = SAMPLE_AUDIO_DIR / "sa1.dac"
     reconstructed_signal = tokenizer.decode(dac_file_path)
@@ -107,13 +158,9 @@ def test_decode_from_tensor(tokenizer):
     compressed = tokenizer.model.compress(audio_signal)
     codes = compressed.codes  # Shape: [B, Q, T]
 
-    # Move codes to cuda if available
     device = next(tokenizer.model.parameters()).device
     codes = codes.to(device)
 
-    z, _, _ = tokenizer.model.quantizer.from_codes(
-        codes
-    )  # Shape: [B, D, T] where D is 1024 = latent_dim = encoder_dim * (2 ** len(encoder_rates))
-    decoded_output = tokenizer.decode(z)
+    decoded_output = tokenizer.decode(codes)
     assert isinstance(decoded_output, torch.Tensor)
     assert decoded_output.dim() == 3
