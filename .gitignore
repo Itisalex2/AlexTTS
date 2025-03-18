@@ -4,3 +4,5 @@
 slurm-*.out
 wandb
 data
+/checkpoints
+core*
