@@ -41,8 +41,9 @@ class TrainingConfig:
     seed: int = 42
     backend: str = "nccl"
 
-    checkpoint_freq: int = 1
+    checkpoint_epoch_freq: int = 1
     validation_freq: int = 1
+    checkpoint_steps_freq: int = 2000
     validation_epoch_logger_freq: int = 100
     resume_checkpoint: Optional[Path] = None
 
@@ -64,6 +65,7 @@ class CheckpointState:
     scheduler_state: Optional[Dict[str, Any]]
     trainer_state: TrainerState
     config: TrainingConfig
+    scaler_state: Optional[Dict[str, Any]] = None
 
     def save(self, path: Path):
         torch.save(
@@ -73,6 +75,7 @@ class CheckpointState:
                 "scheduler_state": self.scheduler_state,
                 "trainer_state": self.trainer_state,
                 "config": self.config,
+                "scaler_state": self.scaler_state,
             },
             path,
         )
@@ -86,6 +89,7 @@ class CheckpointState:
             scheduler_state=checkpoint.get("scheduler_state"),
             trainer_state=checkpoint["trainer_state"],
             config=checkpoint["config"],
+            scaler_state=checkpoint["scaler_state"],
         )
 
 
@@ -183,9 +187,15 @@ class DistributedTTSTrainer:
             scheduler_state=self.scheduler.state_dict() if self.scheduler else None,
             trainer_state=self.state,
             config=self.config,
+            scaler_state=self.scaler.state_dict() if self.scaler else None,
         )
 
-        filename = f"checkpoint_{self.state.epoch:04d}.pt" if not best else "best.pt"
+        if best:
+            filename = "best.pt"
+        elif self.state.global_step % self.config.checkpoint_steps_freq == 0:
+            filename = f"checkpoint_step_{self.state.global_step:06d}.pt"
+        else:
+            filename = f"checkpoint_epoch_{self.state.epoch:04d}.pt"
         path = self.config.checkpoint_dir / filename
         checkpoint.save(path)
         logger.info(f"Saved checkpoint to {path}")
@@ -198,6 +208,9 @@ class DistributedTTSTrainer:
 
         if self.scheduler and checkpoint.scheduler_state:
             self.scheduler.load_state_dict(checkpoint.scheduler_state)
+
+        if checkpoint.scaler_state and self.scaler:
+            self.scaler.load_state_dict(checkpoint.scaler_state)
 
         self.state = checkpoint.trainer_state
 
@@ -227,7 +240,6 @@ class DistributedTTSTrainer:
                         text_tokens=batch["text_tokens"],
                         audio_tokens=batch["audio_tokens"][:, :, :-1],
                         target=batch["audio_tokens"][:, :, 1:],
-                        mask=batch["attention_mask"][:, :-1],
                     )
 
                 if torch.isnan(loss) or torch.isinf(loss):
@@ -263,6 +275,9 @@ class DistributedTTSTrainer:
                     self.optimizer.zero_grad()
                     self.scheduler.step()
                     self.state.global_step += 1
+
+                    if self.state.global_step % self.config.checkpoint_steps_freq == 0:
+                        self.save_checkpoint()
             except Exception as e:
                 logger.error(
                     f"Training: Skipping batch {batch_idx} due to error: {e}",
@@ -294,7 +309,6 @@ class DistributedTTSTrainer:
                         text_tokens=batch["text_tokens"],
                         audio_tokens=batch["audio_tokens"][:, :, :-1],
                         target=batch["audio_tokens"][:, :, 1:],
-                        mask=batch["attention_mask"][:, :-1],
                     )
 
                     num_samples = batch["text_tokens"].size(0)
@@ -343,7 +357,9 @@ def setup_distributed(config: TrainingConfig) -> torch.device:
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
     torch.manual_seed(config.seed + dist.get_rank())
-    return torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"cuda:{local_rank}")
+    logger.info(f"Process {os.getpid()} using GPU: {device}")
+    return device
 
 
 def train(config: TrainingConfig):
@@ -355,6 +371,8 @@ def train(config: TrainingConfig):
 
     ttsTransformerArgs = TTSTransformerArgs(
         text_vocab_size=misaki_tokenizer.vocab_size,
+        text_pad_id=config.text_pad_id,
+        audio_pad_id=config.audio_pad_id,
         audio_vocab_size=dac_tokenizer.vocab_size,
     )
     model = TTSTransformer(ttsTransformerArgs)
@@ -368,13 +386,17 @@ def train(config: TrainingConfig):
         if (epoch + 1) % config.validation_freq == 0:
             trainer.validate()
 
-        if (epoch + 1) % config.checkpoint_freq == 0:
+        if (epoch + 1) % config.checkpoint_epoch_freq == 0:
             trainer.save_checkpoint()
 
     dist.destroy_process_group()
 
 
 if __name__ == "__main__":
-    # config = TrainingConfig(resume_checkpoint=Path("checkpoints/checkpoint_0002.pt"))
-    config = TrainingConfig(resume_checkpoint=None)
+    # config = TrainingConfig(resume_checkpoint=Path("checkpoints/checkpoint_0001.pt"))
+    # config = TrainingConfig(resume_checkpoint=Path("checkpoints/best.pt"))
+    config = TrainingConfig(
+        resume_checkpoint=Path("checkpoints/checkpoint_step_186000.pt")
+    )
+    # config = TrainingConfig(resume_checkpoint=None)
     train(config)

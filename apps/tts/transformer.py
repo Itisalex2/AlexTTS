@@ -18,6 +18,7 @@ from .lingua_transformer_modified import (
 class TTSTransformerArgs(BaseTransformerArgs):
     seed: int = 42
     text_vocab_size: int = -1
+    text_pad_id: int = 0
     audio_vocab_size: int = -1
     audio_pad_id: int = 0
     num_quantizers: int = 12
