@@ -43,8 +43,9 @@ def test_greedy_sampling(mock_components):
     generator.generate("test")
 
     generated = generator.audio_tokenizer.decode.call_args[0][0]
-    assert torch.all(generated[:, :, 0] == audio_tok.bos_id), "Missing BOS"
-    assert torch.all(generated[:, :, 1:] == 0), "Non-zero tokens after BOS"
+    assert torch.all(generated[:, :, :] == 0), (
+        "Non-zero tokens after BOS removed in post processing"
+    )
 
 
 def test_temperature_sampling(mock_components):
@@ -134,6 +135,6 @@ def test_eos_handling(mock_components):
 
     assert not torch.any(generated_tokens == eos_id), "EOS token not removed"
 
-    assert generated_tokens.shape[-1] == final_length, (
+    assert generated_tokens.shape[-1] == final_length - 1, (
         f"Expected {final_length - 1} tokens, got {generated_tokens.shape[-1]}"
     )

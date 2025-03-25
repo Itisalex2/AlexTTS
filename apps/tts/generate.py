@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import torch
+from torch import Tensor
 import torchaudio
 from tqdm import tqdm
 
@@ -87,12 +88,13 @@ class TTSGenerator:
             next_logits = logits[:, :, -1]  # Get last timestep
 
             next_token = self._sample_next(next_logits)
-            audio_tokens = torch.cat([audio_tokens, next_token], dim=-1)
 
             if (next_token == self.audio_tokenizer.eos_id).any():
-                audio_tokens = audio_tokens[:, :, :-1]
                 break
 
+            audio_tokens = torch.cat([audio_tokens, next_token], dim=-1)
+
+        audio_tokens = self.post_process_audio_tokens(audio_tokens)
         waveform = self.audio_tokenizer.decode(audio_tokens)  # [B, 1, audio_t]
         waveform = waveform.squeeze(1).cpu()
 
@@ -121,6 +123,11 @@ class TTSGenerator:
             1,
         ).view(batch_size, num_codebooks, 1)  # [B, Q, 1]
 
+    def post_process_audio_tokens(self, audio_tokens: Tensor) -> Tensor:
+        audio_tokens = audio_tokens[:, :, 1:]  # Don't include the start token
+        audio_tokens[audio_tokens == self.audio_tokenizer.bos_id] = 0
+        return audio_tokens
+
 
 def load_checkpoint(model: torch.nn.Module, config: GenerateConfig):
     checkpoint = torch.load(
@@ -133,7 +140,7 @@ def load_checkpoint(model: torch.nn.Module, config: GenerateConfig):
 if __name__ == "__main__":
     BEST_CHECKPOINT = Path("checkpoints/best.pt")
     config = GenerateConfig(
-        temperature=0.0,
+        temperature=0.8,
         top_k=50,
         top_p=None,
         max_tokens=800,
@@ -150,9 +157,16 @@ if __name__ == "__main__":
     )
 
     model = TTSTransformer(ttsTransformerArgs).to(config.device)
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    logger.info(
+        f"Total parameters: {total_params:,}, Trainable parameters: {trainable_params:,}"
+    )
+
     if config.model_path:
         load_checkpoint(model, config)
 
     generator = TTSGenerator(model, misaki_tokenizer, dac_tokenizer, config)
 
-    generator.generate(text="HELLO THERE I AM A DOG AND YOU ARE A CAT")
+    generator.generate(text="Enjoy the last moments")
