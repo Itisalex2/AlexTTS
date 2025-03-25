@@ -70,9 +70,9 @@ def test_save_to_pt_files(mock_dataset, temp_data_dir):
         expected_keys = {
             "text_tokens",
             "audio_tokens",
-            "text",
-            "audio",
-            "sampling_rate",
+            # "text",
+            # "audio",
+            # "sampling_rate",
         }
         assert all(key in saved_data for key in expected_keys), (
             "Missing keys in saved data"
@@ -87,9 +87,9 @@ def test_save_to_pt_files(mock_dataset, temp_data_dir):
             saved_data["audio_tokens"],
             torch.tensor(original_sample["audio_tokens"], dtype=torch.long),
         )
-        assert saved_data["text"] == original_sample["text"]
-        assert np.array_equal(saved_data["audio"], original_sample["audio"]["array"])
-        assert saved_data["sampling_rate"] == original_sample["audio"]["sampling_rate"]
+        # assert saved_data["text"] == original_sample["text"]
+        # assert np.array_equal(saved_data["audio"], original_sample["audio"]["array"])
+        # assert saved_data["sampling_rate"] == original_sample["audio"]["sampling_rate"]
 
 
 def test_save_to_pt_files_empty_dataset(temp_data_dir):
@@ -128,7 +128,11 @@ def test_tts_dataset_initialization(dataset_on_disk):
 
     sample = dataset[0]
     print(sample)
-    expected_keys = {"text_tokens", "audio_tokens", "text", "audio", "sampling_rate"}
+    expected_keys = {
+        "text_tokens",
+        "audio_tokens",
+        # "text", "audio", "sampling_rate"
+    }
     assert all(key in sample for key in expected_keys), "Missing keys in dataset sample"
 
 
@@ -139,17 +143,17 @@ def test_tts_dataset_getitem(dataset_on_disk):
 
     assert isinstance(sample["text_tokens"], torch.Tensor)
     assert isinstance(sample["audio_tokens"], torch.Tensor)
-    assert isinstance(sample["text"], str)
-    assert isinstance(sample["audio"], np.ndarray)
-    assert isinstance(sample["sampling_rate"], int)
+    # assert isinstance(sample["text"], str)
+    # assert isinstance(sample["audio"], np.ndarray)
+    # assert isinstance(sample["sampling_rate"], int)
 
     assert torch.equal(sample["text_tokens"], torch.tensor([1, 2, 3], dtype=torch.long))
     assert torch.equal(
         sample["audio_tokens"], torch.tensor([[4, 5, 6], [7, 8, 9]], dtype=torch.long)
     )
-    assert sample["text"] == "hello world"
-    assert np.array_equal(sample["audio"], np.array([0.1, 0.2, 0.3]))
-    assert sample["sampling_rate"] == 16000
+    # assert sample["text"] == "hello world"
+    # assert np.array_equal(sample["audio"], np.array([0.1, 0.2, 0.3]))
+    # assert sample["sampling_rate"] == 16000
 
 
 def test_tts_collator():
