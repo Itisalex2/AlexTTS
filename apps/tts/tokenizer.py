@@ -1,14 +1,15 @@
-from lingua.tokenizer import Tokenizer
-from misaki import en
-from typing import List, Tuple, Dict, Union
-from audiotools import AudioSignal
-from pathlib import Path
-import torch
-from torch import Tensor
-import string
 import logging
-import dac
+import string
+from pathlib import Path
+from typing import Dict, List, Tuple, Union
 
+import dac
+import torch
+from audiotools import AudioSignal
+from misaki import en
+from torch import Tensor
+
+from lingua.tokenizer import Tokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ class DacTokenizer(Tokenizer):
         audio_input: Union[str, Path, Tensor],
         add_bos: bool = True,
         add_eos: bool = True,
-    ) -> dac.DACFile:
+    ) -> Tensor:
         if isinstance(audio_input, (str, Path)):
             signal = AudioSignal(audio_input)
         elif isinstance(audio_input, Tensor):
@@ -170,28 +171,30 @@ class DacTokenizer(Tokenizer):
             )
 
         signal.to(self.model.device)
-        compressed = self.model.compress(signal)
-
-        codes = compressed.codes  # [B, Q, T]
+        x = self.model.preprocess(
+            signal.audio_data, signal.sample_rate
+        )  # [B, 1, T] mono
+        _, codes, _, _, _ = self.model.encode(x)  # [B, Q, T] codes
 
         if add_bos:
             bos_tokens = torch.full((codes.size(0), codes.size(1), 1), self.bos_id).to(
                 self.model.device
             )
-            compressed.codes = torch.cat([bos_tokens, compressed.codes], dim=-1)
+            codes = torch.cat([bos_tokens, codes], dim=-1)
         if add_eos:
             eos_tokens = torch.full((codes.size(0), codes.size(1), 1), self.eos_id).to(
                 self.model.device
             )
-            compressed.codes = torch.cat([compressed.codes, eos_tokens], dim=-1)
+            codes = torch.cat([codes, eos_tokens], dim=-1)
 
-        return compressed
+        return codes
 
     def decode(
         self, audio_input: Union[str, Path, dac.DACFile, Tensor]
     ) -> Union[AudioSignal, Tensor]:
         if isinstance(audio_input, (str, Path, dac.DACFile)):
             reconstructed_signal = self.model.decompress(audio_input)  # Audio signal
+            return reconstructed_signal
         elif isinstance(audio_input, Tensor):
             if audio_input.dim() != 3:
                 raise ValueError(f"Codes must be 3D [B, Q, T], got {audio_input.shape}")
@@ -203,8 +206,6 @@ class DacTokenizer(Tokenizer):
                 "Unsupported compressed input type. Expected dac.DACFile or torch.Tensor."
             )
 
-        return reconstructed_signal
-
     def get_token_offsets(self):
         raise NotImplementedError
 
@@ -215,6 +216,7 @@ def create_dac_tokenizer_model(model_type: str = "16khz") -> dac.DAC:
     except Exception as e:
         raise RuntimeError(f"Failed to download or load the DAC model: {e}")
     model = dac.DAC.load(model_path)
+    print("DAC model sample rate:", model.sample_rate)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)

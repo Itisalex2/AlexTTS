@@ -1,12 +1,13 @@
 import gc
 from pathlib import Path
 
+import dac
 import pytest
 import torch
 from audiotools import AudioSignal
+from torch import Tensor
 
 from ..tokenizer import DacTokenizer
-import dac
 
 TEST_DIR = Path(__file__).parent
 SAMPLE_AUDIO_DIR = TEST_DIR / "sample_audio"
@@ -47,10 +48,9 @@ def test_instantiation(tokenizer: DacTokenizer):
 
 def test_encode_from_file(tokenizer):
     audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
-    compressed = tokenizer.encode(audio_file_path)
-    assert isinstance(compressed, dac.DACFile)
-    assert compressed.codes is not None
-    codes = compressed.codes
+    codes = tokenizer.encode(audio_file_path)
+    assert isinstance(codes, Tensor)
+    assert codes is not None
     assert isinstance(codes, torch.Tensor)
     assert codes.dim() == 3, (
         f"Expected codes to have 3 dimensions, but got {codes.dim()}"
@@ -69,9 +69,9 @@ def test_encode_from_tensor(tokenizer):
     duration_seconds = 1
     num_samples = sample_rate * duration_seconds
     audio_tensor = torch.randn(1, 1, num_samples)  # Mono audio
-    compressed = tokenizer.encode(audio_tensor)
-    assert isinstance(compressed, dac.DACFile)
-    assert compressed.codes is not None
+    codes = tokenizer.encode(audio_tensor)
+    assert isinstance(codes, Tensor)
+    assert codes is not None
 
 
 def test_encode_with_incorrect_tensor_dimensions(tokenizer):
@@ -97,8 +97,7 @@ def test_encode_with_unsupported_input_type(tokenizer):
 def test_bos_token_addition(tokenizer):
     audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
 
-    compressed = tokenizer.encode(audio_file_path, add_bos=True, add_eos=False)
-    codes = compressed.codes
+    codes = tokenizer.encode(audio_file_path, add_bos=True, add_eos=False)
 
     assert torch.all(codes[:, :, 0] == tokenizer.bos_id), (
         "BOS token not found at start of all codebooks"
@@ -112,8 +111,7 @@ def test_bos_token_addition(tokenizer):
 def test_eos_token_addition(tokenizer):
     audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
 
-    compressed = tokenizer.encode(audio_file_path, add_bos=False, add_eos=True)
-    codes = compressed.codes
+    codes = tokenizer.encode(audio_file_path, add_bos=False, add_eos=True)
 
     assert torch.all(codes[:, :, -1] == tokenizer.eos_id), (
         "EOS token not found at end of all codebooks"
@@ -127,33 +125,32 @@ def test_eos_token_addition(tokenizer):
 def test_full_token_wrapping(tokenizer):
     audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
 
-    compressed_raw = tokenizer.encode(audio_file_path, add_bos=False, add_eos=False)
-    original_length = compressed_raw.codes.shape[-1]
+    codes = tokenizer.encode(audio_file_path, add_bos=False, add_eos=False)
+    original_length = codes.shape[-1]
 
-    compressed = tokenizer.encode(audio_file_path, add_bos=True, add_eos=True)
-    codes = compressed.codes
+    codes_with_wrap = tokenizer.encode(audio_file_path, add_bos=True, add_eos=True)
 
-    assert codes.shape[-1] == original_length + 2, (
-        f"Expected length {original_length + 2}, got {codes.shape[-1]}"
+    assert codes_with_wrap.shape[-1] == original_length + 2, (
+        f"Expected length {original_length + 2}, got {codes_with_wrap.shape[-1]}"
     )
 
-    assert torch.all(codes[:, :, 0] == tokenizer.bos_id), "BOS missing"
-    assert torch.all(codes[:, :, -1] == tokenizer.eos_id), "EOS missing"
+    assert torch.all(codes_with_wrap[:, :, 0] == tokenizer.bos_id), "BOS missing"
+    assert torch.all(codes_with_wrap[:, :, -1] == tokenizer.eos_id), "EOS missing"
 
-    assert torch.all(codes[:, :, 1:-1] == compressed_raw.codes), (
+    assert torch.all(codes_with_wrap[:, :, 1:-1] == codes), (
         "Original codes modified between BOS and EOS"
     )
 
 
 def test_decode_from_dacfile(tokenizer):
-    dac_file_path = SAMPLE_AUDIO_DIR / "sa1.dac"
+    dac_file_path = SAMPLE_AUDIO_DIR / "sa2.dac"
     reconstructed_signal = tokenizer.decode(dac_file_path)
     assert isinstance(reconstructed_signal, AudioSignal)
     assert reconstructed_signal.audio_data is not None
 
 
 def test_decode_from_tensor(tokenizer):
-    audio_file_path = SAMPLE_AUDIO_DIR / "sa1.wav"
+    audio_file_path = SAMPLE_AUDIO_DIR / "sa2.wav"
     audio_signal = AudioSignal(audio_file_path)
     compressed = tokenizer.model.compress(audio_signal)
     codes = compressed.codes  # Shape: [B, Q, T]
