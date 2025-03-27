@@ -127,23 +127,17 @@ class TTSTransformer(BaseTransformer):
         if target is not None:
             losses = []
             for i in range(self.num_quantizers):
-                # Flatten to [B*T_audio, vocab_size] vs [B*T_audio]
                 losses.append(
                     cross_entropy(
-                        logits[:, i].contiguous().view(-1, self.audio_vocab_size),
-                        target[:, i].contiguous().view(-1),
+                        logits[:, i]
+                        .contiguous()
+                        .view(-1, self.audio_vocab_size),  # [B*T_audio, vocab_size]
+                        target[:, i].contiguous().view(-1),  # [B*T_audio]
                         ignore_index=self.audio_pad_id,
                     )
                 )
 
-            # Weight losses by quantizer level
-            loss_weights = torch.linspace(
-                self.quantizer_max_weight,
-                self.quantizer_min_weight,
-                self.num_quantizers,
-                device=logits.device,
-            )
-            total_loss = sum(w * loss for w, loss in zip(loss_weights, losses))
+            total_loss = torch.stack(losses).mean()
             return total_loss, logits
 
         return logits
