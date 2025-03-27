@@ -1,9 +1,11 @@
+import shutil
+
+import numpy as np
 import pytest
 import torch
 from datasets import DatasetDict
-import shutil
-import numpy as np
-from ..data import save_to_pt_files, TTSDataset, TTSCollator
+
+from ..data import TTSCollator, TTSDataset, save_to_pt_files
 
 
 @pytest.fixture
@@ -62,7 +64,7 @@ def test_save_to_pt_files(mock_dataset, temp_data_dir):
         assert split_dir.exists(), f"Directory for {split} was not created"
 
     for split in splits:
-        sample_path = temp_data_dir / split / "sample_0.pt"
+        sample_path = temp_data_dir / split / "sample_00000000.pt"
         assert sample_path.exists(), f"Sample file for {split} was not created"
 
         saved_data = torch.load(sample_path, weights_only=False)
@@ -70,9 +72,6 @@ def test_save_to_pt_files(mock_dataset, temp_data_dir):
         expected_keys = {
             "text_tokens",
             "audio_tokens",
-            # "text",
-            # "audio",
-            # "sampling_rate",
         }
         assert all(key in saved_data for key in expected_keys), (
             "Missing keys in saved data"
@@ -87,9 +86,6 @@ def test_save_to_pt_files(mock_dataset, temp_data_dir):
             saved_data["audio_tokens"],
             torch.tensor(original_sample["audio_tokens"], dtype=torch.long),
         )
-        # assert saved_data["text"] == original_sample["text"]
-        # assert np.array_equal(saved_data["audio"], original_sample["audio"]["array"])
-        # assert saved_data["sampling_rate"] == original_sample["audio"]["sampling_rate"]
 
 
 def test_save_to_pt_files_empty_dataset(temp_data_dir):

@@ -1,20 +1,17 @@
 import numpy as np
-import torch
 import pytest
+import torch
 from datasets import Dataset, DatasetDict
+from torch import Tensor
+
 from ..data import apply_audio_tokenizer
 
 
-class DummyDACFile:
-    def __init__(self, codes):
-        self.codes = codes
-
-
 class DummyDacTokenizer:
-    def encode(self, audio_input: torch.Tensor) -> DummyDACFile:
+    def encode(self, audio_input: torch.Tensor) -> Tensor:
         codes = torch.tensor([0, 1, 2]).unsqueeze(0).unsqueeze(0)
 
-        return DummyDACFile(codes)
+        return codes
 
 
 @pytest.fixture

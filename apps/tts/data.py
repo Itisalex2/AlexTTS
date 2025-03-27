@@ -1,12 +1,16 @@
-from datasets import load_dataset, DatasetDict
-from typing import Dict, List, Union
-from lingua.tokenizer import Tokenizer
-from .tokenizer import MisakiTokenizer, DacTokenizer, create_dac_tokenizer_model
-import torch
-from torch.utils.data import Dataset, DataLoader
-from pathlib import Path
-from torch.nn.utils.rnn import pad_sequence
 import logging
+from pathlib import Path
+from typing import Dict, List, Union
+
+import torch
+import torchaudio
+from datasets import DatasetDict, load_dataset
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, Dataset
+
+from lingua.tokenizer import Tokenizer
+
+from .tokenizer import DacTokenizer, MisakiTokenizer, create_dac_tokenizer_model
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -15,28 +19,37 @@ logging.basicConfig(
 
 
 class TTSDataset(Dataset):
-    def __init__(self, split: str, data_dir: Path):
+    def __init__(self, split: str, data_dir: Path, include_original_data: bool = False):
         self.data_dir = data_dir / split
         self.file_paths = list(self.data_dir.glob("*.pt"))
+        self.include_original_data = include_original_data
 
     def __len__(self):
         return len(self.file_paths)
 
     def __getitem__(self, idx):
         data = torch.load(self.file_paths[idx], weights_only=False)
-        return {
-            "text_tokens": data["text_tokens"],
-            "audio_tokens": data["audio_tokens"],
-            # "text": data["text"],
-            # "audio": data["audio"],
-            # "sampling_rate": data["sampling_rate"],
-        }
+
+        if self.include_original_data:
+            return {
+                "text_tokens": data["text_tokens"],
+                "audio_tokens": data["audio_tokens"],
+                "text": data["text"],
+                "audio": data["audio"],
+                "sampling_rate": data["sampling_rate"],
+            }
+        else:
+            return {
+                "text_tokens": data["text_tokens"],
+                "audio_tokens": data["audio_tokens"],
+            }
 
 
 class TTSCollator:
-    def __init__(self, text_pad_id, audio_pad_id):
+    def __init__(self, text_pad_id, audio_pad_id, include_original_data: bool = False):
         self.text_pad_id = text_pad_id
         self.audio_pad_id = audio_pad_id
+        self.include_original_data = include_original_data
 
     def __call__(self, batch):
         text_tokens = [sample["text_tokens"] for sample in batch]
@@ -52,12 +65,19 @@ class TTSCollator:
         )  # [B, T, Q]
         audio_padded = audio_padded.permute(0, 2, 1)  # [B, Q, T]
 
-        return {
-            "text_tokens": text_padded,
-            "audio_tokens": audio_padded,
-            # "texts": [sample["text"] for sample in batch],
-            # "audio": [sample["audio"] for sample in batch],
-        }
+        if self.include_original_data:
+            return {
+                "text_tokens": text_padded,
+                "audio_tokens": audio_padded,
+                "texts": [sample["text"] for sample in batch],
+                "audio": [sample["audio"] for sample in batch],
+                "sampling_rate": [sample["sampling_rate"] for sample in batch],
+            }
+        else:
+            return {
+                "text_tokens": text_padded,
+                "audio_tokens": audio_padded,
+            }
 
 
 def filter_empty_audio(dataset: DatasetDict) -> DatasetDict:
@@ -114,7 +134,7 @@ def apply_audio_tokenizer(dataset: DatasetDict, tokenizer: Tokenizer) -> Dataset
         assert audio_tensor.dim() == 3, "Tensor input must have 3 dimensions"
 
         with torch.no_grad():
-            tokenized_audio = tokenizer.encode(audio_tensor).codes.squeeze(0)
+            tokenized_audio = tokenizer.encode(audio_tensor).squeeze(0)
 
         assert tokenized_audio.dim() == 2, (
             f"Codes should have 2 dimensions: (num_codebooks, timesteps), but it has size {tokenized_audio.size()}"
@@ -132,6 +152,7 @@ def save_to_pt_files(
     splits: List[str],
     data_dir: Path,
     start_idx: int = 0,
+    include_original_data: bool = False,
 ):
     for split in splits:
         (data_dir / split).mkdir(parents=True, exist_ok=True)
@@ -139,7 +160,7 @@ def save_to_pt_files(
     for split in splits:
         for idx, sample in enumerate(dataset[split]):
             global_idx = start_idx + idx
-            filepath = data_dir / split / f"sample_{global_idx}.pt"
+            filepath = data_dir / split / f"sample_{global_idx:08d}.pt"
             if filepath.exists():
                 raise Exception(
                     f"Sample already exist! Start index: {start_idx}. Current index: {global_idx}"
@@ -148,16 +169,25 @@ def save_to_pt_files(
             text_tokens = torch.tensor(sample["text_tokens"], dtype=torch.long)
             audio_tokens = torch.tensor(sample["audio_tokens"], dtype=torch.long)
 
-            torch.save(
-                {
-                    "text_tokens": text_tokens,
-                    "audio_tokens": audio_tokens,
-                    # "text": sample["text"],
-                    # "audio": sample["audio"]["array"],
-                    # "sampling_rate": sample["audio"]["sampling_rate"],
-                },
-                filepath,
-            )
+            if include_original_data:
+                torch.save(
+                    {
+                        "text_tokens": text_tokens,
+                        "audio_tokens": audio_tokens,
+                        "text": sample["text"],
+                        "audio": sample["audio"]["array"],
+                        "sampling_rate": sample["audio"]["sampling_rate"],
+                    },
+                    filepath,
+                )
+            else:
+                torch.save(
+                    {
+                        "text_tokens": text_tokens,
+                        "audio_tokens": audio_tokens,
+                    },
+                    filepath,
+                )
 
 
 def get_max_lengths(dataset: Dataset):
@@ -174,15 +204,18 @@ def get_max_lengths(dataset: Dataset):
     return max_text_len, max_audio_len
 
 
-def generate_training_data(start_sample: int, end_sample: Union[int, None]):
+def generate_training_data(
+    start_sample: int,
+    end_sample: Union[int, None],
+    chunk_size: int = 1000,
+    include_original_data: bool = False,
+):
     punctuation_mappings = {
         "<COMMA>": ",",
         "<PERIOD>": ".",
         "<QUESTIONMARK>": "?",
         "<EXCLAMATIONPOINT>": "!",
     }
-
-    CHUNK_SIZE = 100
 
     AUDIO_SAMPLING_RATE = "16khz"
     misaki_tokenizer = MisakiTokenizer()
@@ -200,9 +233,9 @@ def generate_training_data(start_sample: int, end_sample: Union[int, None]):
         end_sample = len(entire_gigaspeech["train"])
         logger.info(f"Total gigaspeech training size: {end_sample}")
 
-    while start_idx + CHUNK_SIZE <= end_sample:
+    while start_idx + chunk_size <= end_sample:
         try:
-            data_range = list(range(start_idx, start_idx + CHUNK_SIZE))
+            data_range = list(range(start_idx, start_idx + chunk_size))
 
             logger.info(f"Data range: {data_range}")
             logger.info("Dataset loaded!")
@@ -228,10 +261,16 @@ def generate_training_data(start_sample: int, end_sample: Union[int, None]):
             gigaspeech = apply_audio_tokenizer(gigaspeech, dac_tokenizer)
             logger.info("Done applying audio tokenizer. Saving to pt files\n")
 
-            save_to_pt_files(gigaspeech, SPLITS, DATA_DIR, start_idx)
+            save_to_pt_files(
+                gigaspeech,
+                SPLITS,
+                DATA_DIR,
+                start_idx,
+                include_original_data=include_original_data,
+            )
             logger.info("Done saving to pt files")
 
-            start_idx += CHUNK_SIZE
+            start_idx += chunk_size
         except Exception as e:
             logger.warn(f"An error occurred: {e}")
             start_idx += 1
@@ -261,12 +300,63 @@ def generate_training_data(start_sample: int, end_sample: Union[int, None]):
     # Sanity check
     for batch_indx, batch in enumerate(train_loader):
         if batch_indx % 1000 == 0:
-            print("Text tokens shape:", batch["text_tokens"].shape)
-            print("Audio tokens shape:", batch["audio_tokens"].shape)
+            logger.info(f"Text tokens shape: {batch['text_tokens'].shape}")
+            logger.info(f"Audio tokens shape: {batch['audio_tokens'].shape}")
+
+
+def enocder_decoder_poc(path: Path):
+    """
+    Proof of concept to ensure data samples contain audio tokens that
+    can be converted back to original audio
+    """
+    data = torch.load(path, weights_only=False)
+
+    audio = data["audio"]
+    text = data["text"]
+
+    logger.info(f"Audio shape: {audio.shape}")
+    logger.info(f"Text: {text}")
+
+    model = create_dac_tokenizer_model()
+    dac_tokenizer = DacTokenizer(model)
+
+    audio_tensor = torch.from_numpy(audio).to(torch.float32)
+    audio_tensor_for_saving = audio_tensor.unsqueeze(0)  # [1, T] where 1 is channels
+    audio_tensor = audio_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, T]
+
+    logger.info("Attempting to encode and then decode to see if I can get same audio")
+
+    reencoded_audio = dac_tokenizer.encode(audio_tensor)  # [1, Q, T]
+    logger.info(
+        f"Re-encoded audio: {reencoded_audio} with shape: {reencoded_audio.shape}"
+    )
+
+    reencoded_audio = reencoded_audio[:, :, 1:-1]  # Get rid of start and end tokens
+    logger.info(
+        f"Re-encoded audio without SOS and EOS: {reencoded_audio} with shape: {reencoded_audio.shape}"
+    )
+
+    redecoded_audio = dac_tokenizer.decode(reencoded_audio)  # [1, 1, T]
+    redecoded_audio = redecoded_audio.squeeze(1)  # [1, T], where 1 is channels
+    logger.info(
+        f"Re-decoded audio: {redecoded_audio} with shape: {redecoded_audio.shape}"
+    )
+
+    torchaudio.save("redecoded_audio.wav", redecoded_audio.detach().cpu(), 16000)
+    torchaudio.save("original_audio.wav", audio_tensor_for_saving, 16000)
+
+    logger.info(f"original audio shape: {audio_tensor_for_saving.shape}")
+    logger.info(f"re-decoded audio shape: {redecoded_audio.shape}")
 
 
 def main():
-    generate_training_data(2300100, None)
+    CHUNK_SIZE = 1000
+    # generate_training_data(0, 100, include_original_data=True)
+    generate_training_data(
+        200, None, chunk_size=CHUNK_SIZE, include_original_data=False
+    )
+    # sample_path = Path("data/train/sample_00000050.pt")
+    # enocder_decoder_poc(sample_path)
 
 
 if __name__ == "__main__":
