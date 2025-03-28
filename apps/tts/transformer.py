@@ -37,6 +37,7 @@ class TTSTransformer(BaseTransformer):
         assert args.audio_vocab_size > 0, "Please specify a valid audio voab size"
 
         self.text_vocab_size = args.text_vocab_size
+        self.text_pad_id = args.text_pad_id
         self.audio_vocab_size = args.audio_vocab_size
         self.audio_pad_id = args.audio_pad_id
         self.num_quantizers = args.num_quantizers
@@ -89,7 +90,8 @@ class TTSTransformer(BaseTransformer):
 
         combined_embeddings = torch.cat([text_embeddings, audio_embeddings], dim=1)
 
-        mask = self.transform_mask(attn_impl, mask)
+        if not mask:
+            mask = self._create_mask(text_tokens, audio_tokens)
 
         h = super().forward(combined_embeddings, mask=mask, attn_impl=attn_impl)
 
@@ -170,13 +172,95 @@ class TTSTransformer(BaseTransformer):
             b=3 * (self.dim * self.num_quantizers) ** -0.5,
         )
 
-    def transform_mask(
-        self,
-        attn_impl: str,
-        mask: Optional[Union[BlockMask, AttentionBias, torch.Tensor, str]] = None,
-    ):
-        if isinstance(mask, torch.Tensor) and attn_impl == "sdpa":
-            # B, S -> B, 1, 1, S. Necessary for broadcasting in sdpa's F.scaled_dot_product_attention
-            mask = mask.unsqueeze(1).unsqueeze(1)
+    def _create_mask(self, text_tokens: Tensor, audio_tokens: Tensor) -> Tensor:
+        assert text_tokens.device == audio_tokens.device, (
+            "Text tokens and audio tokens must be on the same device!"
+        )
+        device = text_tokens.device
+
+        text_mask = self._create_text_padding_mask(text_tokens).to(device)
+        audio_mask = self._create_audio_padding_mask(audio_tokens).to(device)
+
+        padding_mask = torch.cat([text_mask, audio_mask], dim=1).to(device)  # [B, T]
+
+        batch_size = text_tokens.shape[0]
+        seq_len = padding_mask.shape[1]
+
+        pad_query = padding_mask.unsqueeze(2)  # shape (B, T, 1)
+        pad_key = padding_mask.unsqueeze(1)  # shape (B, 1, T)
+        padding_mask = pad_query & pad_key  # shape (B, T, T)
+
+        attention_mask = self._create_attention_mask(text_tokens, audio_tokens).to(
+            device
+        )  # [B, T, T]
+
+        mask = padding_mask & attention_mask  # [B, T, T]
+
+        assert mask.shape == (batch_size, seq_len, seq_len), (
+            f"Mask at this point should be [B, T, T], but got {mask.shape} instead"
+        )
+        mask = mask.unsqueeze(1)  # [B, 1, T, T]
+        assert mask.shape == (batch_size, 1, seq_len, seq_len), (
+            f"Final mask should be [B, 1, T, T], but got {mask.shape} instead"
+        )
 
         return mask
+
+    def _create_text_padding_mask(self, text_padded: Tensor) -> Tensor:
+        assert text_padded.dim() == 2, (
+            f"Padded text tokens should have dimensions 2, but got {text_padded.dim()} instead"
+        )
+        return (
+            text_padded != self.text_pad_id
+        )  # [B, text_length] where True means attend to
+
+    def _create_audio_padding_mask(self, audio_padded: Tensor) -> Tensor:
+        # Check first quantizer's time steps for padding
+        assert audio_padded.dim() == 3, (
+            f"Padded audio tokens should have dimensions 2, but got {audio_padded.dim()} instead"
+        )
+        return (
+            audio_padded[:, 0, :] != self.audio_pad_id
+        )  # [B, audio_length] where True means attend to
+
+    def _create_attention_mask(
+        self, text_tokens: Tensor, audio_tokens: Tensor
+    ) -> Tensor:
+        assert text_tokens.dim() == 2, (
+            f"Text tokens should have dimensions 2, but got {text_tokens.dim()} instead"
+        )
+        assert audio_tokens.dim() == 3, (
+            f"Audio tokens should have dimensions 2, but got {audio_tokens.dim()} instead"
+        )
+
+        # Text: [B, text_t], Audio: [B, Q, audio_t]
+        batch_size, text_len = text_tokens.shape
+        audio_len = audio_tokens.shape[2]
+
+        total_len = text_len + audio_len
+        causal_mask = torch.zeros(
+            (total_len, total_len), dtype=torch.bool, device=text_tokens.device
+        )
+        causal_mask[:text_len, :text_len] = True  # Text can attend to all text
+        causal_mask[text_len:, :text_len] = True  # Audio can attend to all text
+
+        causal_mask[text_len:, text_len:] = torch.tril(
+            torch.ones(
+                audio_len, audio_len, dtype=torch.bool, device=text_tokens.device
+            )
+        )
+
+        assert causal_mask.shape == (total_len, total_len), (
+            f"Expected {total_len, total_len} but got {causal_mask.shape} instead"
+        )  # [total_t, total_t]
+
+        causal_mask = causal_mask.unsqueeze(0).expand(batch_size, -1, -1)
+        assert causal_mask.shape == (
+            batch_size,
+            total_len,
+            total_len,
+        ), (
+            f"Expected {(batch_size, total_len, total_len)} but got {causal_mask.shape} instead"
+        )  # [B, total_t, total_t
+
+        return causal_mask
