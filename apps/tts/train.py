@@ -18,6 +18,14 @@ from .tokenizer import DacTokenizer, MisakiTokenizer, create_dac_tokenizer_model
 from .transformer import TTSTransformer, TTSTransformerArgs
 
 logger = logging.getLogger(__name__)
+logger.propagate = False
+logger.setLevel(logging.INFO)
+log_dir = Path("logs")
+log_dir.mkdir(exist_ok=True)
+file_handler = logging.FileHandler(log_dir / "training_loss.log")
+formatter = logging.Formatter("%(asctime)s - %(message)s")
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 
 @dataclass
@@ -37,13 +45,14 @@ class TrainingConfig:
     text_pad_id: int = 0
     audio_pad_id: int = 0
 
-    num_workers: int = 4
+    num_workers: int = 48
     seed: int = 42
     backend: str = "nccl"
 
     checkpoint_epoch_freq: int = 1
     validation_freq: int = 1
     checkpoint_steps_freq: int = 2000
+    global_step_log_freq: int = 10
     validation_epoch_logger_freq: int = 100
     resume_checkpoint: Optional[Path] = None
 
@@ -257,7 +266,9 @@ class DistributedTTSTrainer:
                     total_loss_tensor = torch.tensor(total_loss, device=self.device)
                     dist.all_reduce(total_loss_tensor, op=dist.ReduceOp.SUM)
 
-                    if self.is_main:
+                    if self.is_main and (
+                        self.state.global_step % self.config.global_step_log_freq == 0
+                    ):
                         avg_loss = total_loss_tensor.item() / (
                             accum_steps * dist.get_world_size()
                         )
@@ -392,11 +403,34 @@ def train(config: TrainingConfig):
     dist.destroy_process_group()
 
 
+def validate(config: TrainingConfig):
+    device = setup_distributed(config)
+
+    dac_model = create_dac_tokenizer_model("16khz")
+    dac_tokenizer = DacTokenizer(dac_model)
+    misaki_tokenizer = MisakiTokenizer()
+
+    ttsTransformerArgs = TTSTransformerArgs(
+        text_vocab_size=misaki_tokenizer.vocab_size,
+        text_pad_id=config.text_pad_id,
+        audio_pad_id=config.audio_pad_id,
+        audio_vocab_size=dac_tokenizer.vocab_size,
+    )
+    model = TTSTransformer(ttsTransformerArgs)
+
+    trainer = DistributedTTSTrainer(config, model, device)
+
+    trainer.validate()
+
+    dist.destroy_process_group()
+
+
 if __name__ == "__main__":
     # config = TrainingConfig(resume_checkpoint=Path("checkpoints/checkpoint_0001.pt"))
     # config = TrainingConfig(resume_checkpoint=Path("checkpoints/best.pt"))
     config = TrainingConfig(
-        resume_checkpoint=Path("checkpoints/checkpoint_step_186000.pt")
+        resume_checkpoint=Path("checkpoints/checkpoint_epoch_0016.pt")
     )
     # config = TrainingConfig(resume_checkpoint=None)
     train(config)
+    # validate(config)
