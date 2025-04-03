@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import AdamW, Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.amp import GradScaler
@@ -16,6 +15,7 @@ from torch.amp import GradScaler
 from .data import TTSCollator, TTSDataset
 from .tokenizer import DacTokenizer, MisakiTokenizer, create_dac_tokenizer_model
 from .transformer import TTSTransformer, TTSTransformerArgs
+from .optim import build_optimizer, OptimArgs
 
 logger = logging.getLogger(__name__)
 logger.propagate = False
@@ -37,7 +37,7 @@ class TrainingConfig:
     grad_accum_steps: int = 1
     grad_clip_norm: float = 1.0
     optimizer: str = "AdamW"
-    lr_scheduler: str = "OneCycleLR"
+    lr_scheduler: str = "cosine"
 
     data_dir: Path = Path("data")
     checkpoint_dir: Path = Path("checkpoints")
@@ -113,38 +113,35 @@ class DistributedTTSTrainer:
         self.model = DDP(
             model.to(device), device_ids=[device.index], output_device=device.index
         )
-        self.optimizer: Optimizer = self._create_optimizer()
+
         self.train_loader, self.val_loader = self._create_dataloaders()
-        self.scheduler = self._create_scheduler()
+        self.optimizer, self.scheduler = self._create_optimizer_and_scheduler()
 
         self.state = TrainerState()
         self.scaler = GradScaler()
         if self.config.resume_checkpoint:
             self.load_checkpoint()
 
-    def _create_optimizer(self):
-        if self.config.optimizer == "AdamW":
-            return AdamW(self.model.parameters(), lr=self.config.learning_rate)
-        else:
-            return NotImplementedError(
-                f"Optimizer: {self.config.optimizer} not implemented!"
-            )
+    def _create_optimizer_and_scheduler(self):
+        if self.config.optimizer != "AdamW":
+            raise NotImplementedError
 
-    def _create_scheduler(self):
-        if self.config.lr_scheduler == "OneCycleLR":
-            return torch.optim.lr_scheduler.OneCycleLR(
-                self.optimizer,
-                max_lr=self.config.max_learning_rate,
-                total_steps=self.config.epochs
-                * (
-                    (len(self.train_loader) + self.config.grad_accum_steps - 1)
-                    // self.config.grad_accum_steps
-                ),
+        total_steps = self._get_dataloader_steps()
+        optim_args = OptimArgs(
+            lr=self.config.learning_rate, scheduler=self.config.lr_scheduler
+        )
+        return build_optimizer(self.model.module, optim_args, total_steps)
+
+    def _get_dataloader_steps(self) -> int:
+        if not self.train_loader:
+            raise Exception(
+                "Cannot get train loder steps when train loader is not initialized!"
             )
-        else:
-            return NotImplementedError(
-                f"lr_scheduler:{self.config.lr_scheduler} not implemented!"
-            )
+        steps_per_epoch = (
+            len(self.train_loader) + self.config.grad_accum_steps - 1
+        ) // self.config.grad_accum_steps
+        total_steps = self.config.epochs * steps_per_epoch
+        return total_steps
 
     def _create_dataloaders(self):
         collator_fn = TTSCollator(self.config.text_pad_id, self.config.audio_pad_id)
@@ -427,10 +424,10 @@ def validate(config: TrainingConfig):
 
 if __name__ == "__main__":
     # config = TrainingConfig(resume_checkpoint=Path("checkpoints/checkpoint_0001.pt"))
-    # config = TrainingConfig(resume_checkpoint=Path("checkpoints/best.pt"))
-    config = TrainingConfig(
-        resume_checkpoint=Path("checkpoints/checkpoint_epoch_0016.pt")
-    )
+    config = TrainingConfig(resume_checkpoint=Path("checkpoints/best.pt"))
+    # config = TrainingConfig(
+    #     resume_checkpoint=Path("checkpoints/checkpoint_epoch_0016.pt")
+    # )
     # config = TrainingConfig(resume_checkpoint=None)
     train(config)
     # validate(config)
