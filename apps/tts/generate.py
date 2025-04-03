@@ -12,6 +12,7 @@ from lingua.tokenizer import Tokenizer
 
 from .tokenizer import DacTokenizer, MisakiTokenizer, create_dac_tokenizer_model
 from .transformer import TTSTransformer, TTSTransformerArgs
+from .train import TrainerState, TrainingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +140,13 @@ def load_checkpoint(model: torch.nn.Module, config: GenerateConfig):
 
 if __name__ == "__main__":
     BEST_CHECKPOINT = Path("checkpoints/best.pt")
+    # BEST_CHECKPOINT = Path("checkpoints/checkpoint_epoch_0016.pt")
+    # BEST_CHECKPOINT = Path("one_example_checkpoints/checkpoint_epoch_0300.pt")
     config = GenerateConfig(
-        temperature=0.8,
+        temperature=0.5,
         top_k=50,
         top_p=None,
-        max_tokens=800,
+        max_tokens=200,
         model_path=BEST_CHECKPOINT,
     )
 
@@ -169,4 +172,8 @@ if __name__ == "__main__":
 
     generator = TTSGenerator(model, misaki_tokenizer, dac_tokenizer, config)
 
-    generator.generate(text="Enjoy the last moments")
+    while True:
+        prompt = input("Please enter your text prompt. Press enter to exit.\n")
+        if prompt == "":
+            break
+        generator.generate(text=prompt)
