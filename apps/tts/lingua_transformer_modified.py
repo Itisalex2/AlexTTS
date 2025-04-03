@@ -1,21 +1,21 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
+import math
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Union, Tuple
+from typing import Optional, Tuple, Union, cast
 
 import torch
 from torch import nn
 from torch.nn import functional as F
-from xformers.ops import fmha, AttentionBias
 from torch.nn.attention.flex_attention import (
     BlockMask,
-    flex_attention,
     _mask_mod_signature,
+    flex_attention,
 )
+from xformers.ops import AttentionBias, fmha
 
 from lingua import probe
-from typing import cast
 
 flex_attention_comp = torch.compile(flex_attention)
 
@@ -411,24 +411,13 @@ class Attention(nn.Module):
         return output
 
     def reset_parameters(self, init_std=None, factor=1.0):
-        init_std = init_std or (self.dim ** (-0.5))
+        gain = nn.init.calculate_gain("linear")
 
         for w in [self.wq, self.wk, self.wv]:
-            nn.init.trunc_normal_(
-                w.weight,
-                mean=0.0,
-                std=init_std,
-                a=-3 * init_std,
-                b=3 * init_std,
-            )
+            nn.init.xavier_uniform_(w.weight, gain=gain)
 
-        nn.init.trunc_normal_(
-            self.wo.weight,
-            mean=0.0,
-            std=init_std / factor,
-            a=-3 * init_std,
-            b=3 * init_std,
-        )
+        output_gain = gain / math.sqrt(self.heads_per_group)
+        nn.init.xavier_uniform_(self.wo.weight, gain=output_gain * factor)
 
 
 class FeedForward(nn.Module):
@@ -475,24 +464,14 @@ class FeedForward(nn.Module):
         return output
 
     def reset_parameters(self, init_std=None, factor=1.0):
-        in_init_std = init_std or (self.dim ** (-0.5))
-        out_init_std = init_std or (self.hidden_dim ** (-0.5))
-        in_init_std = in_init_std
-        out_init_std = out_init_std / factor
+        gain = nn.init.calculate_gain("leaky_relu", param=0.1)
+
         for w in [self.w1, self.w3]:
-            nn.init.trunc_normal_(
-                w.weight,
-                mean=0.0,
-                std=in_init_std,
-                a=-3 * in_init_std,
-                b=3 * in_init_std,
-            )
-        nn.init.trunc_normal_(
+            nn.init.xavier_uniform_(w.weight, gain=gain)
+
+        nn.init.xavier_uniform_(
             self.w2.weight,
-            mean=0.0,
-            std=out_init_std,
-            a=-3 * out_init_std,
-            b=3 * out_init_std,
+            gain=nn.init.calculate_gain("linear") * factor / math.sqrt(2),
         )
 
 

@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from typing import Optional, Union
 
@@ -26,7 +27,9 @@ class TTSTransformerArgs(BaseTransformerArgs):
     quantizer_min_weight: float = 0.0
     max_seqlen: int = 4096
 
-    n_heads: int = 8
+    dim: int = 768
+    n_layers: int = 12
+    n_heads: int = 12
 
 
 class TTSTransformer(BaseTransformer):
@@ -55,6 +58,7 @@ class TTSTransformer(BaseTransformer):
 
         self.norm = RMSNorm(self.dim, eps=args.norm_eps)
         self.output = nn.Linear(self.dim, self.audio_vocab_size * self.num_quantizers)
+        self.init_weights()
 
     def forward(  # type: ignore[override]
         self,
@@ -146,30 +150,19 @@ class TTSTransformer(BaseTransformer):
 
     def reset_parameters(self):
         super().reset_parameters()
-        init_std = self.dim**-0.5
+        init_gain = nn.init.calculate_gain("linear")
 
         # Text embeddings
-        nn.init.trunc_normal_(
-            self.text_embeddings.weight,
-            mean=0.0,
-            std=init_std,
-            a=-3 * init_std,
-            b=3 * init_std,
-        )
+        nn.init.xavier_uniform_(self.text_embeddings.weight, gain=init_gain)
 
         # Audio embeddings
         for emb in self.audio_embeddings:
-            nn.init.trunc_normal_(
-                emb.weight, mean=0.0, std=init_std, a=-3 * init_std, b=3 * init_std
-            )
+            nn.init.xavier_uniform_(emb.weight, gain=init_gain)
 
         # Output layer
-        nn.init.trunc_normal_(
+        nn.init.xavier_uniform_(
             self.output.weight,
-            mean=0.0,
-            std=(self.dim * self.num_quantizers) ** -0.5,
-            a=-3 * (self.dim * self.num_quantizers) ** -0.5,
-            b=3 * (self.dim * self.num_quantizers) ** -0.5,
+            gain=nn.init.calculate_gain("linear") / math.sqrt(self.num_quantizers),
         )
 
     def _create_mask(self, text_tokens: Tensor, audio_tokens: Tensor) -> Tensor:

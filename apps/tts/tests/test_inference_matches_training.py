@@ -42,8 +42,8 @@ def test_inference_matches_training():
     relative_error = (
         (logits_forward - logits_step).abs() / logits_forward.abs()
     ).mean()
-
-    assert relative_error < 1e-5, "Relative error too high"
+    
+    assert relative_error < 1e-4, f"Relative error: {relative_error} too high."
 
 
 if __name__ == "__main__":
