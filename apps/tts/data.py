@@ -304,6 +304,108 @@ def generate_training_data(
             logger.info(f"Audio tokens shape: {batch['audio_tokens'].shape}")
 
 
+def generate_validaton_data(
+    start_sample: int,
+    end_sample: Union[int, None],
+    chunk_size: int = 1000,
+    include_original_data: bool = False,
+):
+    punctuation_mappings = {
+        "<COMMA>": ",",
+        "<PERIOD>": ".",
+        "<QUESTIONMARK>": "?",
+        "<EXCLAMATIONPOINT>": "!",
+    }
+
+    AUDIO_SAMPLING_RATE = "16khz"
+    misaki_tokenizer = MisakiTokenizer()
+    dac_model = create_dac_tokenizer_model(AUDIO_SAMPLING_RATE)
+    dac_tokenizer = DacTokenizer(dac_model)
+    DATA_DIR = Path("data")
+    SPLITS = ["validation"]
+
+    logger.info("Loading dataset...")
+
+    entire_gigaspeech = load_dataset(
+        "speechcolab/gigaspeech", "xs", data_dir="validation"
+    )
+
+    start_idx = start_sample
+    if end_sample is None:
+        end_sample = len(entire_gigaspeech["validation"])
+        logger.info(f"Total gigaspeech validation size: {end_sample}")
+
+    while start_idx + chunk_size <= end_sample:
+        try:
+            data_range = list(range(start_idx, start_idx + chunk_size))
+
+            logger.info(f"Data range: {data_range}")
+            logger.info("Dataset loaded!")
+
+            gigaspeech = DatasetDict(
+                {"validation": entire_gigaspeech["validation"].select(data_range)}
+            )
+
+            # logger.info("Filtering empty audio samples")
+            # gigaspeech = filter_empty_audio(gigaspeech)
+            COLUMNS_TO_KEEP = ["text", "audio"]
+            logger.info("Filtering useful fields\n")
+            gigaspeech = get_useful_fields(gigaspeech, COLUMNS_TO_KEEP)
+            logger.info(
+                "Done filtering useful fields. Mapping punctuation in dataset\n"
+            )
+            gigaspeech = map_punctuation_in_dataset(gigaspeech, punctuation_mappings)
+            logger.info(
+                "Done mapping punctuation in dataset. Applying text tokenizer\n"
+            )
+            gigaspeech = apply_text_tokenizer(gigaspeech, misaki_tokenizer)
+            logger.info("Done applying text tokenizer. Applying audio tokenizer\n")
+            gigaspeech = apply_audio_tokenizer(gigaspeech, dac_tokenizer)
+            logger.info("Done applying audio tokenizer. Saving to pt files\n")
+
+            save_to_pt_files(
+                gigaspeech,
+                SPLITS,
+                DATA_DIR,
+                start_idx,
+                include_original_data=include_original_data,
+            )
+            logger.info("Done saving to pt files")
+
+            start_idx += chunk_size
+        except Exception as e:
+            logger.warn(f"An error occurred: {e}")
+            start_idx += 1
+            continue
+
+    logger.info("Test loading TTS dataset\n")
+
+    validation_dataset = TTSDataset("validation", DATA_DIR)
+    collator = TTSCollator(
+        text_pad_id=misaki_tokenizer.pad_id, audio_pad_id=dac_tokenizer.pad_id
+    )
+    validation_loader = DataLoader(
+        validation_dataset,
+        batch_size=8,
+        collate_fn=collator,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+    )
+
+    max_text_len, max_audio_len = get_max_lengths(validation_dataset)
+    total_seq_length = max_text_len + max_audio_len
+    logger.info(f"Max text length: {max_text_len}")
+    logger.info(f"Max audio length: {max_audio_len}")
+    logger.info(f"Total sequence length: {total_seq_length}")
+
+    # Sanity check
+    for batch_indx, batch in enumerate(validation_loader):
+        if batch_indx % 1000 == 0:
+            logger.info(f"Text tokens shape: {batch['text_tokens'].shape}")
+            logger.info(f"Audio tokens shape: {batch['audio_tokens'].shape}")
+
+
 def enocder_decoder_poc(path: Path):
     """
     Proof of concept to ensure data samples contain audio tokens that
@@ -355,7 +457,9 @@ def main():
     generate_training_data(
         200, None, chunk_size=CHUNK_SIZE, include_original_data=False
     )
+    # generate_validaton_data(0, None, chunk_size=CHUNK_SIZE, include_original_data=False)
     # sample_path = Path("data/train/sample_00000050.pt")
+    # sample_path = Path("data/validation/sample_00000050.pt")
     # enocder_decoder_poc(sample_path)
 
 
