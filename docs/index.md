@@ -11,7 +11,7 @@ I wanted to understand, at a low level, what an end-to-end deep learning project
 
 > Why not build my own unique text-to-speech model?
 
-*See results [here!](#sample-audio-clips)*
+*[Results](#sample-audio-clips) and [source code](https://github.com/Itisalex2/AlexTTS)*
 ## Terminology
 - Text to speech (TTS): convert words to human speech
 - Autoregressive: generate one token at a time, conditioning each output on previously generated tokens. Example: ChatGPT
@@ -116,7 +116,7 @@ At the heart of AlexTTS is a decoder-only ```TTSTransformer```, inherited from [
 
 | Input | Embedding process | Attention-ready input |
 |:-----------|:---------------------------|:------------|
-| Text tokens $[B, T_{\text{text}}]$    | Single ```nn.embedding``` | $[B, T_{\text{text}}, D]$ |
+| Text tokens $[B, T_{\text{text}}]$    | $nn.embedding(V, D)$ where $V$ is vocab size and $D$ is embedding dimensions | $[B, T_{\text{text}}, D]$ |
 | Audio tokens $[B, Q, T_{\text{audio}}]$ | Each of the Q quantizers gets its own embedding layer, producing $[B, T_{\text{audio}}, D]$ per quantizer. These are summed over the Q axis to form a single audio-embedding sequence | $[B, T_{\text{audio}}, D]$ |
 
 
@@ -334,12 +334,13 @@ Inference is **random**. Here is a collection of good/bad generations.
   Your browser does not support the audio element.
 </audio>
 
+While AlexTTS does not yet match the fluency and robustness of production-grade models like Misaki, it is valid as a proof of concept considering its smaller size, limited training time, and lack of a reference encoder. 
 
 ## Conclusion
 Building AlexTTS was one of the most challenging and rewarding experiences I’ve had in my deep learning journey. I set out wanting to understand what it *really* means to build an end-to-end system from scratch—and I did. From data preprocessing and tokenization, to designing a custom transformer architecture, to training on distributed GPUs and sampling audio autoregressively, I had the opportunity to touch every part of the stack.
 
 I learned how important good tokenization is, how tricky autoregressive inference can be, and how even seemingly small implementation details (like weight initialization or mask construction) can dramatically affect model performance. I also developed a deeper appreciation for the engineering tradeoffs made in production TTS systems, especially around speed, quality, and parallelism.
 
-While the final model didn’t achieve state-of-the-art quality, I’m proud of what I accomplished. I didn’t rely on pre-built TTS libraries or models—I implemented everything from the ground up to truly internalize how it works. This project has given me both the confidence and the practical skillset to tackle more complex multimodal problems in the future.
+Compared to more polished systems like Misaki, AlexTTS is still early in its lifecycle — but the core ideas work. It tokenizes speech, models the sequence autoregressively, and generates audio that sounds like natural speech. While the final model didn’t achieve state-of-the-art quality, I’m proud of what I accomplished. I didn’t rely on pre-built TTS libraries or models—I implemented everything from the ground up to truly internalize how it works. This project has given me both the confidence and the practical skillset to tackle more complex multimodal problems in the future.
 
 Thank you for reading!
